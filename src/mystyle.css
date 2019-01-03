@@ -1,0 +1,146 @@
+body{
+	font: .75em Arial,sans-serif; 
+	background: #FFFFFF; 
+	color: #333333
+}
+table.all tr td {
+	padding: 1px 10px;
+}
+table.all tr:first-child th {
+	background: rgb(255,255,255); /* Old browsers */
+	background: -moz-linear-gradient(top, rgba(255,255,255,1) 1%, rgba(216,240,255,1) 49%, rgba(255,255,255,1) 99%); /* FF3.6-15 */
+	background: -webkit-linear-gradient(top, rgba(255,255,255,1) 1%,rgba(216,240,188,255,1) 49%,rgba(255,255,255,1) 99%); /* Chrome10-25,Safari5.1-6 */
+	background: linear-gradient(to bottom, rgba(255,255,255,1) 1%,rgba(216,240,255,1) 49%,rgba(255,255,255,1) 99%); /* W3C, IE10+, FF16+, Chrome26+, Opera12+, Safari7+ */
+	filter: progid:DXImageTransform.Microsoft.gradient( startColorstr='#ffffff', endColorstr='#ffffff',GradientType=0 );
+	padding: 8px 10px;
+	color: black;
+
+}
+/* no applied to externally loaded table but why not ? */
+table#stable td {
+	text-align: right;
+
+}
+
+div#
+container{
+	width: 1000px; 
+	margin:0 auto
+}
+h1{ 
+	color: #F60; 
+	margin: 1em 0 0; 
+	letter-spacing: -2px; 
+}
+p{
+	margin: 0 0 1.7em; 
+}
+
+a.tooltip{
+	text-decoration:none;
+	color:black;
+	font-weight:bold;
+}
+
+a.tooltip:hover
+{    position: relative;               
+	background: transparent;          
+
+}  
+
+a.tooltip span  
+{    position: absolute;               
+	visibility: hidden;               
+
+	width: 20em;                      
+	top: 1.5em;             
+	background: #ffffdd;                    
+}
+
+a.tooltip:hover span  
+{    visibility: visible;   }
+
+
+a.tooltip2{
+	text-decoration:none;
+	color:black;
+	font-weight:bold;
+}
+
+a.tooltip2:hover
+{    position: relative;               
+	background: transparent;          
+
+}  
+
+a.tooltip2 span  
+{    position: absolute;               
+	visibility: hidden;               
+
+	width: 20em;                      
+	top: 1.5em;left:-10em;             
+	background: #ffffdd;                    
+}
+
+a.tooltip2:hover span  
+{    visibility: visible;   }
+
+
+a.tooltip3{
+	text-decoration:none;
+	color:black;
+	font-weight:bold;
+}
+
+a.tooltip3:hover
+{    position: relative;               
+	background: transparent;          
+
+}  
+
+a.tooltip3 span  
+{    position: absolute;               
+	visibility: hidden;               
+
+	width: 20em;                      
+	top: 3em;             
+	background: #ffffdd;                    
+}
+
+a.tooltip3:hover span  
+{    visibility: visible;   }
+
+
+a.tooltip4{
+	text-decoration:none;
+	color:black;
+	font-weight:bold;
+}
+
+a.tooltip4:hover
+{    position: relative;               
+	background: transparent;          
+
+}  
+
+a.tooltip4 span  
+{    position: absolute;               
+	visibility: hidden;               
+
+	width: 20em;                      
+	top:3em;left:-10em;             
+	background: #ffffdd;                    
+}
+
+a.tooltip4:hover span  
+{    visibility: visible;   }
+
+span.w {
+	background-color: white;
+}
+span.b {
+	background-color: #ccf2ff;
+}
+span.r {
+	background-color: #ffcccc;
+}

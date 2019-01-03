@@ -1,0 +1,2236 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+######################
+## Author: SM
+## Date: 01/01/2018
+## Version: 1.0.0
+######################
+
+use File::Path;
+use File::Basename;
+use Getopt::Long;
+Getopt::Long::Configure(qw{no_auto_abbrev no_ignore_case_always});
+use POSIX qw/strftime/;
+
+check_install();
+my $tool='quantify';
+
+if(not -d "$ENV{'HOME'}/mirbase/21/cache/"){ `mkdir -p "$ENV{'HOME'}/mirbase/21/cache/"`;}
+
+## precision for printf, right now 0 decimal digits 
+my $pf='%.f'; ## not implemented yet
+
+my %kept_read;
+my %hash;
+my %hash_star;
+my %hash_sample;
+my %hash_star_sample;
+
+my %total;
+my $total_t;
+my %mapcounts;
+
+my %seen;
+my $species = 'none';
+my $time= time();
+
+my $ml=100;
+my %organisms;
+my %rorganisms;
+my ($u, $v);
+while(<DATA>){
+    chomp;
+    if(/^\s*(\S+)\s+(\S+)\s*$/){
+        $u=lc($1);
+        $v=lc($2);
+        $u =~ s/ //g;
+        $v =~ s/ //g;
+        $organisms{$u}=$v;
+        $rorganisms{$v}=$u;
+    }
+}
+
+
+## options
+my $ccall="$0 @ARGV";
+my %options=();
+
+my $go =GetOptions ('reads|r=s' => \$options{r},
+    'mature|m=s' => \$options{m},
+    'precursor|p=s' => \$options{p},
+    'star|s=s' => \$options{s},
+    'species|t=s' => \$options{t},
+    'mature5p3p|P' => \$options{P},
+    'config|C' => \$options{C},
+    'ucsc|u' => \$options{u},
+    'tag|y=s' => \$options{y},
+    'nopdf|d' => \$options{d},
+    'nosamplesort|o' => \$options{o},
+    'amibiguouspm|k' => \$options{k},
+    'nofileconversion|n' => \$options{n},
+    'noremap|x' => \$options{x},
+    'max-mismatch|g=i' => \$options{g},
+    'nt-upstream|e=i' => \$options{e},
+    'nt-downstream|f=i' => \$options{f},
+    'nopdf_nomrd|j' => \$options{j},
+    'whole_transcript|w' => \$options{w},
+    'weighed|W' => \$options{W},
+    'unique|U' => \$options{U},
+    'nornafold|F' => \$options{F},
+    'norpm|R' => \$options{R},
+    'onlyrpm|Z' => \$options{Z},
+    'outputweighedreads|X' => \$options{X},
+    'nostructure|A' => \$options{A},
+    'remakepdfs|Y' => \$options{Y},
+    'nofilecheck|N' => \$options{N},
+    'threads|T=i' => \$options{T},
+    'shorthtml|S' => \$options{S},
+    'coverageplot|G' => \$options{G},
+    'onecol5p3p|B' => \$options{B},
+    'useumitag|a' => \$options{a},
+    'exactbegin|J' => \$options{J},
+    'exactend|K' => \$options{K}
+);
+
+
+die "One of the options supplied doesn't exist\n" if(not $go);
+
+if($options{'A'}){ $options{'F'} =1;}
+## we would need to run RNAfold to get dot-bracket notation
+## however, if we dont output structures in pdfs we dont need RNAfold at all
+## if structures are in cache we dont need to redo them so we can use option F and still output structures
+#getopts("XNGFAp:m:r:s:t:y:dokunxg:e:f:vjwT:PWURCZSYO:BaD:QJKHM",\%options);
+
+## if options w disable S and P if given but should not be given
+if($options{'w'}){
+    delete $options{'S'} if($options{'S'});
+    delete $options{'P'} if($options{'P'});
+}
+
+
+my %d = ();
+dhash(\%d);
+
+my %reid;
+if($options{'D'}){
+    open IN,$options{'D'} or die "File with remapped ids depending on UMI length not found\n";
+    while(<IN>){
+        my @l=split();
+        $reid{$l[0]}=$l[1];
+    }
+    close IN;
+}
+
+my %offset=();
+if($options{'O'}){
+    open IN,$options{'O'} or die "File $options{'O'} not found\n";
+    while(<IN>){
+        my @l=split();
+        $offset{$l[2]}{'offset'}=$l[1];
+        for(my $i=5;$i<=$#l;$i+=3){
+            $offset{$l[2]}{$l[$i]}{'s'}=$l[$i-2];
+            $offset{$l[2]}{$l[$i]}{'e'}=$l[$i-1];
+        }
+    }
+}
+close IN;
+
+my $opt_N='';
+if($options{'Y'}){
+    $opt_N='-N';
+}
+
+my $opt_R='';
+$opt_R='-R' if($options{'R'});
+
+my $opt_B='';
+$opt_B='-Z' if($options{'B'});
+
+
+my $opt_S='';
+$opt_S='-S' if($options{'S'});
+
+my $opt_A='';
+$opt_A='-A' if($options{'A'} or $options{'F'});
+
+my $opt_G='';
+$opt_G='-G' if($options{'G'}); # this option is for make_html3.pl and will make short pdfs with the coverage only 
+
+## number of mismatches when mapping reads to precursors, default one
+my $mismatches = 1;
+$mismatches = $options{'g'} if(defined $options{'g'});
+
+my $threads=1;
+$threads = $options{'T'} if($options{'T'});
+
+
+my $upstream = 2;
+my $downstream = 5;
+
+$upstream = $options{'e'} if(defined $options{'e'});
+$downstream = $options{'f'} if(defined $options{'f'});
+
+
+if($options{'u'}){
+    print STDERR "\n\nAllowed species arguments, many of them are not linked to UCSC\n\n";
+    for(keys %organisms){
+        print STDERR "$_\t$organisms{$_}\n";
+    }
+    die "\n";
+}
+
+
+## lets add some colors 
+my $R="\x1b[31m";
+my $G="\x1b[32m";
+my $Y="\x1b[33m";
+my $B="\x1b[34m";
+my $M="\x1b[35m";
+my $C="\x1b[36m";
+my $E="\x1b[0m";
+
+sub col{
+    return "$_[0]$_[1]$E";
+}
+
+
+my $usage=col($C,'Usage:')."
+${B}quantify ".col($C,'-r')." reads.fa ".col($C,'-p')." precursor.fa ".col($C,'-m')." mature.fa ".col($C,'-t')." species ".col($G,'[options]')."
+
+".col($C,'-r/--reads')."     reads.fa      your read sequences
+".col($C,'-p/--precursor')." precursor.fa  miRNA precursor sequences from miRBase or full length transcript
+".col($C,'-m/--mature')."    mature.fa     miRNA sequences from miRBase or fragments to be quantified
+".col($C,'-t/--species')."   e.g. Mouse or mmu
+if not searching in a specific species all species in your files will be analyzed
+else only the species in your dataset is considered
+
+".col($G,'[optional parameters]')."
+".col($G,'-C/--config')."                  if specified then file at option -r is a config file
+".col($G,'-u/--ucsc')."                    list all values allowed for the species parameter, many of them are not linked to UCSC Blat
+".col($G,'-s/--star')."                    optional star sequences from miRBase
+".col($G,'-P/--mature5p3p')."              specify this option of your mature miRNA file contains 5p and 3p ids only
+".col($G,'-y/--tag')."                     custom tag for current run, otherwise a new one is generated
+".col($G,'-d/--nopdf')."                   dont genereate pdfs
+".col($G,'-o/--nosamplesort')."            dont sort reads by sample in pdf file
+".col($G,'-k/--ambiguouspm')."             also considers precursor-mature mappings that have different ids, eg let7c
+would be allowed to map to pre-let7a
+".col($G,'-n/--nofileconversion')."        dont do file conversion again
+".col($G,'-x/--noremap')."                 dont map against precursors again
+".col($G,'-g/--max-mismatch')."            number of allowed mismatches when mapping reads to precursors, default 1
+".col($G,'-e/--nt-upstream')."             number of nucleotides upstream of the mature sequence to consider, default 2
+".col($G,'-f/--nt-downstream')."           number of nucleotides downstream of the mature sequence to consider, default 5
+".col($G,'-j/--nopdf_nomrd')."             do not create an output.mrd file and pdfs if specified
+".col($G,'-w/--whole_transcript')."        expression is determined only for sequences given by option 'p'
+".col($G,'-W/--weighed')."                 read counts are weighed by their number of mappings. 
+e.g. A read maps twice so each position gets 0.5 added to its read profile
+".col($G,'-U/--unqiue')."                  use only unique read mappings; Caveat: Some miRNAs have multiple precursors/tRNAs have plenty. 
+These will be underestimated in their expression since multimappers are excluded
+".col($G,'-F/--nornafold')."               dont run RNAfold in here for structure prediction. Using with option -d will speed up the whole thing alot!
+".col($G,'-R/--norpm')."                   dont calculate the RPMs in output. e.g. when using UMIs data does not need to be normalized
+".col($G,'-Z/--onlyrpm')."                 only output RPMs in output 
+".col($G,'-X/--outputweighedreads')."      only works when W is given and will output also the number of weighed reads!
+".col($G,'-A/--nostructure')."             RNA secondary structures will not be part of the pdf output
+".col($G,'-N/--nofilecheck')."             dont check read file for format compliance - speeds up things but may give unpredictable results if format is not ok
+".col($G,'-T/--threads')."                 Number of threads to use for mapping
+".col($G,'-S/--shorthtml')."               shortend html output, no sequences given in output
+".col($G,'-O/--offsets')."                 file with miRNA offsets describing where mature and star are starting in precursor
+".col($G,'-Y/--remakepdfs')."              pdfs will be remade no matter if the same pdf exists already            
+".col($G,'-G/--coverageplot')."            pdfs will only contain the coverage plots
+".col($G,'-B/--onecol5p3p')."              put 5p/3p read counts in output in same column
+".col($G,'-a/--useumitag')."               use the _uINT tag instead of the _xINT tag for counting reads 
+".col($G,'-J/--exactbegin')."              count only reads that have the exact 5 prime end (no isomirs) (defined by -e 0)
+".col($G,'-K/--exactend')."                count only reads that have the exact 3 prime ends (no variation at the 3p end allowed). (defined by -f 0). 
+Using J,K and g=0 and -e 0 -f 0 will count only the mature sequence with no MM
+\n";
+
+my $opt_m='';
+
+if($options{'t'}){
+    $species = lc($options{'t'});
+    $species =~ s/ //g;
+
+    if($rorganisms{$species}){
+        $species = $rorganisms{$species};
+    }elsif($organisms{$species}){
+    }else{
+        warn "\n\nThe species $options{'t'} you specified is not available\navailable species are\n";
+        `quantify -u`;
+        exit 1;
+    }
+    $opt_m = "-m $species";
+}
+
+
+## if files exist in our mirbase dir we can omit them when calling quantify
+if(not $options{'p'} and not $options{'m'} and $species ne 'none' and not $options{'w'} and -f "$ENV{'HOME'}/mirbase/21/hairpin.fa"){ 
+    $options{'m'}="$ENV{'HOME'}/mirbase/21/mature.fa";
+    $options{'p'}="$ENV{'HOME'}/mirbase/21/hairpin.fa";
+}
+
+
+if(not $options{'p'} or not $options{'r'}){
+    die "No precursor file or a reads file was given with options p and r\n$usage\n";
+}
+
+if(not $options{'w'} and not $options{'m'}){
+    die "Neither a mature file with option m nor option w to use the precursor file only were given\n$usage\n";
+}
+
+
+## dont check if option w is given 
+if(not $options{'P'} and not $options{'w'}){
+    check_option_P();
+}
+
+
+## this option tells make_html3 to consider the whole precursor as the mature sequence
+my $opt_z='';
+if($options{'w'}){
+    $opt_z='-z';
+    $options{'m'}="$options{'p'}.dummy";
+    open IN,"$options{'p'}";
+    open OUT,">$options{'p'}.dummy";
+    while(<IN>){
+        if(/>/){print OUT;
+        }else{
+            ## try with setting to whole sequence
+            print OUT;
+            ## this was the initial setting
+            #print OUT substr($_,0,18),"\n";
+        }
+    }
+    close IN;
+    close OUT;
+
+    $options{'e'}=0;
+    $options{'f'}=0;
+}
+
+
+if($options{'y'}){
+    $time = $options{'y'}
+}
+
+my $opt_d ="";
+if($options{'d'}){
+    $opt_d = "-d";
+}
+
+## sort pdf reads by sample
+my $opt_o ='';
+if(not $options{'o'}){
+    $opt_o = "-o";
+}
+
+my ( $name0, $path0, $extension0 ) = fileparse ( $options{'p'}, '\..*' );
+my ( $name1, $path1, $extension1 ) = fileparse ( $options{'m'}, '\..*' );# if(not defined $options{'w'});
+my ( $name2, $path2, $extension2 ) = fileparse ( $options{'r'}, '\..*' );
+my ( $name3, $path3, $extension3 );
+
+$name0.=$extension0;
+$name1.=$extension1;
+$name2.=$extension2;
+
+
+if($options{'s'}){
+    if(-s "$options{'s'}"){
+        ( $name3, $path3, $extension3 ) = fileparse ( $options{'s'}, '\..*' );
+        $name3.=$extension3;
+    }else{
+        print STDERR "The file $options{'s'} is empty or not found. It will be ignored for this analysis";
+        $options{'s'}=0;
+    }
+}
+
+
+my $dir="expression_analyses";
+
+if(not -d $dir){
+    mkdir($dir);
+}
+
+print "#Starting quantification\n";
+open ERR,">quantifier_${time}.log" or die "Cannot create log file for quantifier in current directory\n";
+print ERR strftime('%Y-%m-%d at %H:%M',localtime)," started\n";
+print ERR "$ccall\n";
+for my $k(sort keys %options){
+#	print ERR "$k\t$d{$k}";
+    if(defined $options{$k} and$options{$k} =~ /\S/){print ERR "$k\t$d{$k}, value set to ::: $options{$k}\n";}
+#	print ERR "\n";
+}
+print ERR "\n";
+
+
+my $outdir="${dir}/${dir}_${time}";
+if(not -d $outdir){
+    mkdir($outdir);
+}
+
+## check if reads file has correct format by quickly checking the first line
+if($options{'r'} =~ /,/){
+
+}elsif($options{'r'} =~ /'\*(\S+)$/){
+    my @FILES=<*$1>;
+    $options{'r'}=join(",",@FILES);
+}elsif($options{'r'} =~ /(\S+)\*(\S+)$/){
+    my @FILES=<$1*$2>;
+    $options{'r'}=join(",",@FILES);
+}
+#die $options{'r'}; ## up to here it works
+
+if(not $options{'C'} and $options{'r'} !~ /,/){
+    open IN,"<$options{'r'}" or die "File $options{'r'} not found\n";
+    my $line = <IN>;
+    if($line !~ /^>[a-zA-Z-\d]+_\d+_x\d+/){
+        die "\n$options{'r'} ids do not have the correct format
+
+        it must have the id line >SSS_INT_xINT\n
+        or alternatively the id line >SSS_INT_xINT_uINT\n
+        SSS is a maximal 6-letter code indicating the sample origin
+        INT is a running number
+        xINT is the number of read occurrences\n
+        uINT is used when xINT indicates the number of UMIs for a read. uINT indicates the total number of reads
+        before PCR duplicate removal
+        ";
+    }
+    close IN;
+}
+
+
+my %samples;
+
+print STDERR "getting samples and corresponding read numbers\n\n";
+
+
+##convert input files to bowtie accepting format
+ConvertFastaFile($options{'p'},$name0,'precursor',$species);
+ConvertFastaFile($options{'m'},$name1,'mature',$species);
+if(not $options{'n'}){
+    print STDERR "Converting input files\n";
+    ## if you want to process multiple read files put them in a config file with a three letter code designating the origin
+    if($options{'C'}){
+        `rm -f "$outdir/reads.converted"`;
+        if($options{'r'} !~ /,/){
+            open IN,$options{'r'} or die "config file not found\n";
+            while(<IN>){
+                chomp;
+                my @l=split();
+                if(length($l[0]) == 3 ){
+                    my ( $name2, $path2, $extension2 ) = fileparse ( $l[1], '\..*' );
+                    $name2.=$extension2;
+                    print "--- $name2\n";
+                    if(not $options{'N'}){
+                        ConvertFastaFile($l[1],'reads',"","",$l[0]);
+                    }else{
+
+                    }
+                }elsif(length($l[1]) == 3){
+                    my ( $name2, $path2, $extension2 ) = fileparse ( $l[0], '\..*' );
+                    $name2.=$extension2;
+                    print "xxx $name2\n";
+                    if(not $options{'N'}){
+                        ConvertFastaFile($l[0],'reads',"","",$l[1]);
+                    }else{
+                    }
+                }else{
+                    die "Your config file contains not enough 3 letter codes in line $_\n";
+                }
+            }
+            $name2='reads';
+        }else{## what happens here is that we gave multiple files on the command line so each file needs to be processed now.
+
+
+
+        }
+    }else{
+        if(-l "$outdir/$name2.converted"){ unlink "$outdir/$name2.converted";}
+        if($options{'N'}){
+            if($options{'r'} !~ /,/){
+                `ln -s "../../$options{'r'}" "$outdir/$name2.converted"` if(not -e "$outdir/$name2.converted");	
+            }
+        }else{
+            ConvertFastaFile($options{'r'},$name2,"","");
+        }
+    }
+
+    if($options{'s'}){
+        ConvertFastaFile($options{'s'},$name3,'star',$species);
+    }
+}else{
+    if($options{'C'}){
+        $name2='reads';
+    }
+}
+if(not $options{'x'}){
+    chdir($outdir);
+    Mapping();
+}else{
+    if($options{'N'}){ $name2='reads';}
+    chdir($outdir);
+}
+
+##now analyze expression file
+print STDERR "analyzing data\n";
+ReadinPrecursorFile();
+
+ReadinMatureMappingFile();
+
+if($options{'s'}){
+    ReadinStarMappingFile();
+}
+ReadinReadsMappingFile();
+chdir("../../");
+PrintExpressionValues();
+PrintExpressionValuesSamples();
+
+if($options{'j'}){
+    print STDERR  "exiting here and not creating miRBase.mrd file and html file
+    if you want this created do not specify option -j\n";
+    exit;
+}
+print STDERR "\nCreating miRBase.mrd file\n\n";
+
+CreateOutputMRD();
+
+my $opt_l ='-l';
+
+if($options{'k'}){
+    $opt_l = '';
+}
+
+
+my $t;
+my $command='';
+
+## defines if 5p and 3p sequences in mature file and no star file given
+my $opt_P="";
+$opt_P="-P" if($options{'P'});
+
+my $opt_W="";
+if($options{'W'}){
+    $opt_W="-W $outdir/read_occ";
+}
+
+my $starf='';
+if($options{'s'}){$starf ="-j $outdir/${name3}_mapped.arf";}
+
+my $opt_t='';
+
+$opt_t="-t $organisms{$species}" if($organisms{$species});
+$opt_t="-t $rorganisms{$species}" if($rorganisms{$species});
+
+
+
+my $script_path=`which quantify`;
+if($script_path =~ /^(.+)quantify/){$script_path=$1;}
+
+if(not -f './mystyle.css'){
+    if(-f "$script_path/../src/mystyle.css"){
+        `cp $script_path/../src/mystyle.css ./mystyle.css`;
+    }else{
+        print STDERR "mystyle.css not found in $script_path/../src/\n";
+    }
+}
+
+
+$command = "make_html3.pl -q $outdir/miRBase.mrd  -i $outdir/${name1}_mapped.arf -M miRNAs_expressed_all_samples_$time.csv $starf $opt_l $opt_m $opt_t $opt_d $opt_o $opt_P $opt_W $opt_A $opt_S $opt_z $opt_N $opt_G $opt_B";
+
+print ERR "\n## making html output file now\n";
+print ERR "$command\n";
+print STDERR "$command\n";
+$t=`$command`;
+print ERR strftime('%Y-%m-%d at %H:%M',localtime),"\tfinished\n";
+close ERR;
+exit;
+
+
+######################################
+#                                    #
+# subroutines                        #
+#                                    #
+######################################
+
+sub Mapping{
+    my $err;
+## build bowtie index
+    print STDERR "building bowtie index\n";
+    my $index='./miRNA_precursor/';
+
+    $err = `bowtie-build precursor.converted miRNA_precursor`;
+
+    if(not $options{'w'}){
+## map mature sequences against precursors
+        print STDERR "mapping mature sequences against index\n";
+        ## do not map mature if options are
+        if(not $options{'M'}){
+            $err = `bowtie -p $threads -f --un not_mapped_mature.fa -v 0 -a --best --strata --norc miRNA_precursor mature.converted ${name1}_mapped.bwt 2>bowtie_mature.out`;}else{
+
+            $err = `bowtie -p $threads -f --un not_mapped_mature.fa -n 0 -l 15 -e 120 -a --best --strata --norc miRNA_precursor mature.converted ${name1}_mapped.bwt 2>bowtie_mature.out`;
+        }	
+        $ml=500 if($options{'w'});
+        $ml+=50;
+        my $ret=`bowtie_to_arf $ml ${name1}_mapped.bwt ${name1}_mapped.arf`;
+        print STDERR "bowtie_to_arf $ml ${name1}_mapped.bwt ${name1}_mapped.arf\n$ret\n";
+    }else{
+        my $gid;
+        my $gs;
+        my $gl=0;
+        open IN,"../../$options{'p'}" or die "No precursor file given in here $options{'p'}\n";
+        open OUT,">${name1}_mapped.arf" or die "Could not create ${name1}_mapped.arf file\n";
+        open OUT2,">${name1}_mapped.bwt" or die "Could not create ${name1}_mapped.bwt file\n";
+
+        while(<IN>){
+            if(/>(\S+)/){
+                $gid=$1;
+                $gs=<IN>;
+                $gl=length($gs)-1;
+                print OUT "$gid\t$gl\t1\t$gl\tacgttgca\t$gid\t$gl\t1\t$gl\tacgttgca\t+\t0\tmmmmmmmm\n";
+                print OUT2 "$gid\t+\t$gid\t0\tACGTTGCA\tIIIIIIII\t0\n";
+            }
+        }
+        close IN;
+        close OUT;
+        close OUT2;
+    }
+    ## convert here to arf already
+
+
+    ## map reads against precursors
+    print STDERR "mapping read sequences against index\n";
+    print ERR "## Mapping reads against precursors now";
+    if($options{'N'}){
+        my $files;
+        if($options{'C'}){
+            $files=fuseC(); ## we can only 'fuse' files here if they have all distinct 3 letter codes. Otherwise don't use option N
+        }else{
+            my @ref=split(",",$options{'r'});
+            $files=join(",../../",@ref);
+            $files="../../$files";
+        }
+        $name2='reads';
+        $err=`bowtie -p $threads -f -v $mismatches -a --best --strata --norc miRNA_precursor $files ${name2}_mapped.bwt 2>bowtie_reads.out`;
+        print ERR "\nbowtie -p $threads -f -v $mismatches -a --best --strata --norc miRNA_precursor $files ${name2}_mapped.bwt 2>bowtie_reads.out\n";
+    }else{
+        $err=`bowtie -p $threads -f -v $mismatches -a --best --strata --norc miRNA_precursor $name2.converted ${name2}_mapped.bwt 2>bowtie_reads.out`;
+        print ERR "\nbowtie -p $threads -f -v $mismatches -a --best --strata --norc miRNA_precursor $name2.converted ${name2}_mapped.bwt 2>bowtie_reads.out\n";
+        ## here we need to see what to do when giving multiple input files but no file conversion
+        read_stats("$name2.converted","${name2}_mapped.bwt");
+    }
+
+
+    if($options{'s'}){
+        print STDERR "mapping star sequences against index\n";
+        $err = `bowtie -p $threads -f -v 0 -a --best --strata --norc miRNA_precursor star.converted ${name3}_mapped.bwt 2>bowtie_star.out`;
+    }
+}
+
+
+sub read_stats{
+    my ($f1,$f2)=@_;
+    my %hash;
+    my $count;
+    my %k2;
+    my $total;
+
+    open IN,"$f1" or die "No reads file in fasta format given\n";
+    while(<IN>){
+        s/\+/p/g;
+        if(/^>*(([a-zA-Z-\d]+)\S+_x(\d+))/){
+            next if($hash{$1});
+            $hash{$1} = 1;
+            $count+=$3;
+            $k2{$2}+=$3;
+        }
+    }
+    close IN;
+    my %hash2;
+    my $count2;
+    my %k22;
+
+    print STDERR "Mapping statistics\n";
+    open IN, "$f2" or die "No mapping file given\n";
+    while(<IN>){
+        s/\+/p/g;
+        if(/^>*(([a-zA-Z-\d]+)\S+_x(\d+))/){
+            next if($hash2{$1});
+            $hash2{$1} = 1;
+            $count2+=$3;
+            $k22{$2}+=$3;
+        }
+    }
+    open STATS,">$options{'r'}_${time}_mapping_stats.txt" or die "Could not create file $options{'r'}_${time}_mapping_stats.txt\n";
+    print STATS "\n#desc\ttotal\tmapped\tunmapped\tmapped\tunmapped\n";
+    print STATS "total: ",$count,"\t",$count2,"\t",$count-$count2,"\t";
+    printf STATS "%.3f\t%.3f\n",$count2/$count,1-($count2/$count);
+
+    print STDERR "\n#desc\ttotal\tmapped\tunmapped\tmapped\tunmapped\n";
+    print STDERR "total: ",$count,"\t",$count2,"\t",$count-$count2,"\t";
+    printf STDERR "%.3f\t%.3f\n",$count2/$count,1-($count2/$count);
+    foreach(sort keys %k2){
+        print STDERR "$_: ",$k2{$_},"\t",$k22{$_},"\t",$k2{$_}-$k22{$_},"\t";
+        printf STDERR "%.3f\t%.3f\n",$k22{$_}/$k2{$_},1-($k22{$_}/$k2{$_});
+        print STATS "$_: ",$k2{$_},"\t",$k22{$_},"\t",$k2{$_}-$k22{$_},"\t";
+        printf STATS "%.3f\t%.3f\n",$k22{$_}/$k2{$_},1-($k22{$_}/$k2{$_});
+    }
+    print STDERR "Mapped reads are those mapping to your reference file with up to $mismatches mismatches\n"; 
+    print STATS "Mapped reads are those mapping to your reference file with up to $mismatches mismatches\n"; 
+    close STATS;
+
+}
+
+sub check_option_P{
+    open IN,$options{'m'} or die "Could not open mature file\n";
+    my ($cnt,$p35)=(0,0);
+    while(<IN>){
+        if(/>/){
+            $cnt++;
+            if(/[53]p/){
+                $p35++;
+            }
+        }
+    }
+    close IN;
+    if($cnt == $p35 and not $options{'P'}){
+        print STDERR "Please run $tool with options -P since you only have 3p and 5p mature sequences\n";
+        print STDERR "Setting options P now in this run\n\n";
+        $options{'P'}=1;
+    }
+}
+
+sub ConvertFastaFile{
+    my $file = shift;
+    my $ofile= shift;
+    my $des = shift;
+    my $sp = shift;
+    my $code= shift;
+#	if($code){print "$file,$ofile\n"}
+    if($file =~ /.gz$/){
+        open INX,"gunzip -dc $file|" or die "Could not unzip file $file or file not found\n";
+    }else{
+        open INX,"$file" or die "File (to convert) $file not found\n";
+    }
+
+    if($code){
+        open OUT,">>$outdir/$ofile.converted" or die "file $outdir/reads.converted could not be created/opened\n";
+    }elsif($des eq ""){
+        open OUT,">$outdir/$ofile.converted" or die "file $outdir/$ofile.converted could not be created\n";
+    }else{
+        open OUT,">$outdir/$des.converted" or die "file $outdir/$des.converted could not be created\n";
+    }
+
+    my $line;
+    my $id;
+    my $tmpid;
+    my $seq;
+    my $first = 1;
+
+    my $sp_hits=0;
+
+    while($line = <INX>){
+        chomp $line;
+        $line =~ s/\+/p/g;
+        if($line =~ /^(>\S+)\s*(\S*)/){
+            $tmpid = $1;
+            if($code){
+                substr($tmpid,1,3,$code);
+            }	
+
+            if(not $first){
+                if($sp eq 'none'){
+                    if($seq !~ /N/ or $options{'H'}){   ## skip reads that contain an N in the sequence
+                        print OUT "$id\n$seq\n";
+                        $sp_hits++;
+                        if($des eq 'mature'){
+                            $ml=length($seq) if($ml <length($seq));
+                        }
+                    }
+                }elsif($id =~ /$sp/i){
+                    if($seq !~ /N/ or $options{'H'}){
+                        print OUT "$id\n$seq\n";
+                        if($des eq 'mature'){
+                            $ml=length($seq) if($ml <length($seq));
+                        }
+                        $sp_hits++;
+                    }
+                }else{}
+
+            }else{
+                $first = 0;
+            }
+            $seq="";
+            $id = $tmpid;
+        }else{
+            $line = uc($line);
+            $line =~ s/U/T/g;
+            $seq .= $line;
+        }
+    }
+    if($sp eq 'none'){
+        if($seq !~ /N/ or $options{'H'}){   ## skip reads that contain an N in the sequence
+            print OUT "$id\n$seq\n";
+            $sp_hits++;
+            if($des eq 'mature'){
+                $ml=length($seq) if($ml <length($seq));
+            }
+        }
+    }elsif($id =~ /$sp/i){
+        if($seq !~ /N/ or $options{'H'}){
+            print OUT "$id\n$seq\n";
+            if($des eq 'mature'){
+                $ml=length($seq) if($ml <length($seq));
+            }
+            $sp_hits++;
+        }else{
+        }	
+    }
+
+
+    close INX;
+    close OUT;
+
+    if(not $sp_hits){
+        die "\nError: No entrys for species \"$options{'t'} or $species\" found in file $file
+        Please make sure that the given species argument matches the species id in your file $file or say none\n\n\n";
+    }
+}
+
+sub ReadinPrecursorFile{
+    my $id;
+    open IN,"precursor.converted" or die "Precursor file precursor.converted not found\n";
+    while(<IN>){
+        chomp;
+        s/\+/p/g;		
+        if(/^>(\S+)/){
+            $id = $1;
+            $hash{$id}{'seq'} = "";
+            $hash_star{$id}{'seq'} = "";
+            ## make it for different samples now
+            for my $sample (keys %samples){
+                $hash_sample{$sample}{$id}{'seq'} = "";
+                $hash_star_sample{$sample}{$id}{'seq'} = "";
+                $hash_sample{$sample}{$id}{'c'} = 0;
+                $hash_sample{$sample}{$id}{'end'} = $hash{$id}{'end'};
+            }
+        }else{
+            $hash{$id}{'seq'} = "$hash{$id}{'seq'}$_"; ## get complete precursor in one line
+            $hash_star{$id}{'seq'} = "$hash{$id}{'seq'}$_";
+        }
+        $hash{$id}{'c'} = 0;
+
+        $hash{$id}{'end'} = length($hash{$id}{'seq'});
+
+
+        $hash_star{$id}{'c'} = 0;
+        $hash_star{$id}{'end'} = length($hash_star{$id}{'seq'});
+
+    }
+    close IN;
+}
+
+
+sub ReadinMatureMappingFile{
+    my @line;
+    my $matches;
+    open OUT,">mature2hairpin" or die "cannot create file mature2hairpin\n";
+    open IN,"${name1}_mapped.bwt" or die "Mature mapping file ${name1}_mapped.bwt not found \n";
+    my $cx;
+    my $id1 ='';
+    my $id2='';
+
+    open MAT,">mature_matches" or die "cannot create file mature matches\n";
+
+    while(<IN>){
+        $id1= '';
+        $id2='';
+        s/\+/p/g;
+        @line = split(/\t/);
+
+        $id1 = $line[0]; ## this is the mature ID
+        $id2 = $line[2]; ## this is the precursor ID
+
+        ## remove multiple endings if ambigous just for matching with precursor
+        $id1 =~ s/\-5p//g;
+        $id1 =~ s/\-3p//g;
+
+        ## here is assumed that multiple precursor ids have 3 - in their id, seems to be ok so far
+        if($id2 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+            $id2 = $1;
+        }
+        ## check this line again for compliance
+        if(not $options{'k'} and $id1 !~ /$id2/i and $id2 !~ /$id1/i){ next;} ## stringent mapping let7a only allowed to map pre-let7a if k is given
+
+        next if($options{'w'} and ($id1 ne $id2) and not $options{'k'});
+
+        if($id1 =~ /trna(\d+)/){
+            my $t1=$1;
+            if($id2 =~ /trna(\d+)/){
+                my $t2=$1;
+                next if($t2 != $t1 and not $options{'k'});
+            }
+        }
+
+
+        $cx++;
+        $hash{$line[2]}{'c'}++;           ## how many mature mapped to this precursor
+        for my $sample(keys %samples){
+            $hash_sample{$sample}{$line[2]}{'c'}++;
+        }
+        $matches = $hash{$line[2]}{'c'};
+        print MAT "$line[2] $matches $line[0]\n";
+
+        ## there is a problem, Hash id is from precursor sequence, mature 7a and 7b map to same precursor
+        $hash{$line[2]}{$matches}{'beg'} = $line[3]-$upstream;
+        $hash{$line[2]}{$matches}{'beg'} = 0 if($hash{$line[2]}{$matches}{'beg'} < 0);
+        $hash{$line[2]}{$matches}{'end'} = $line[3]+length($line[4])-1+$downstream;
+        $hash{$line[2]}{$matches}{'score'} = 0;
+        $hash{$line[2]}{$matches}{'mature'} = $line[0]; ## assign unique mature sequence to precursor
+
+        for my $sample(keys %samples){
+            $hash_sample{$sample}{$line[2]}{$matches}{'beg'} = $hash{$line[2]}{$matches}{'beg'};
+            $hash_sample{$sample}{$line[2]}{$matches}{'end'} = $hash{$line[2]}{$matches}{'end'};
+            $hash_sample{$sample}{$line[2]}{$matches}{'score'} = $hash{$line[2]}{$matches}{'score'};
+            $hash_sample{$sample}{$line[2]}{$matches}{'mature'} = $hash{$line[2]}{$matches}{'mature'};
+        }
+        print OUT "$line[2]\t$line[0]\n";
+    }
+
+    print "\n$cx mature mappings to precursors\n\n";
+    close OUT;
+    close IN;
+    close MAT;
+}
+
+sub ReadinStarMappingFile{
+    my @line;
+    my $matches;
+
+    open IN,"${name3}_mapped.bwt" or die "Mature mapping file ${name3}_mapped.bwt not found \n";
+    my $cx;
+    my $ltmp = "qwertyuiop";
+    my $id1 ='';
+    my $id2='';
+
+
+    while(<IN>){
+        $id1= '';
+        $id2='';
+        @line = split(/\t/);
+
+        $id1 = $line[0]; ## this is the mature ID
+        $id2 = $line[2]; ## this is the precursor ID
+
+        ## remove multiple endings if ambigous just for matching with precursor
+        $id1 =~ s/\*//g;
+        $id1 =~ s/\-5p//g;
+        $id1 =~ s/\-3p//g;
+        if($id1 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+            $id1 = $1;
+        }
+        if($id2 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+            $id2 = $1;
+        }
+        next if(not $options{'k'} and $id1 !~ /$id2/i and $id2 !~ /$id1/i);## maybe this can be removed
+
+        if($id1 =~ /trna(\d+)/){
+            my $t1=$1;
+            if($id2 =~ /trna(\d+)/){
+                my $t2=$1;
+                next if($t2 != $t1 and not $options{'k'});
+            }
+        }
+
+        $cx++;
+        $hash_star{$line[2]}{'c'}++;
+        for my $sample(keys %samples){
+            $hash_star_sample{$sample}{$line[2]}{'c'}++;
+        }
+
+
+        #print "$line[2]\t$hash{$line[2]}{'c'}\n";
+        $matches = $hash_star{$line[2]}{'c'};
+        ## there is a problem, Hash id is from precursor sequence, mature 7a and 7b map to same precursor
+        $hash_star{$line[2]}{$matches}{'beg'} = $line[3]-$upstream;
+        $hash_star{$line[2]}{$matches}{'beg'} = 0 if($hash_star{$line[2]}{$matches}{'beg'} < 0);
+        $hash_star{$line[2]}{$matches}{'end'} = $line[3]+length($line[4])-1+$downstream;
+        $hash_star{$line[2]}{$matches}{'score'} = 0;
+        $hash_star{$line[2]}{$matches}{'mature'} = $line[0];
+
+
+        for my $sample(keys %samples){
+            $hash_star_sample{$sample}{$line[2]}{$matches}{'beg'} = $hash_star{$line[2]}{$matches}{'beg'};
+            $hash_star_sample{$sample}{$line[2]}{$matches}{'end'} = $hash_star{$line[2]}{$matches}{'end'};
+            $hash_star_sample{$sample}{$line[2]}{$matches}{'score'} = $hash_star{$line[2]}{$matches}{'score'};
+            $hash_star_sample{$sample}{$line[2]}{$matches}{'mature'} = $hash_star{$line[2]}{$matches}{'mature'};
+        }
+
+
+
+    }
+    print "\n$cx star mappings to precursors\n\n";
+}
+
+
+
+
+sub ReadinReadsMappingFile{
+    my @line;
+    my $rb;
+    my $re;
+    my @scores;
+    my $len_sc;
+
+    my %m2h;
+    my %mc;
+    if($options{'Q'}){
+        open IN,"mature.converted" or die "File mature.converted not found\n";
+        while(<IN>){
+            chomp;
+            if(/>(\S+)/){
+                my $id=$1;
+                $mc{$id}=<IN>;
+                chomp $mc{$id};
+            }
+        }
+        close IN;
+
+
+        open IN,"mature2hairpin" or die "File mature2hairpin not found\n";
+        while(<IN>){
+            chomp;
+            my @l=split();
+            $m2h{$l[0]}{$l[1]}=$mc{$l[1]};
+        }
+        close IN;
+    }
+
+    my %ids=();
+
+    ## get number of times a read was mapped, used for weighing
+    my $id;
+    open IN,"${name2}_mapped.bwt" or die "Reads mapping File ${name2}_mapped.bwt not found \n";
+    while(<IN>){
+        if(/^(\S+)/){
+            $id=$1;
+            next if($id !~ /_x\d/);
+            $id=$reid{$id} if($options{'D'});
+            $mapcounts{$id}++;
+        }
+    }
+    close IN;
+
+    open OUT,">read_occ" or die "Could not create file with read_occ\n";
+    for my $k(keys %mapcounts){
+        print OUT "$k\t$mapcounts{$k}\n";
+    }
+    close OUT;
+
+    open IN,"${name2}_mapped.bwt" or die "Reads mapping File ${name2}_mapped.bwt not found \n";
+
+    my $matched = 0;
+    my $sample;
+
+    while(<IN>){
+        s/\+/p/g;
+        $matched = 0;
+        @line = split(/\t/);
+
+        next if($line[0] !~ /_x\d/);
+        ## we skip here if see an N in the mapping
+        next if($line[4] =~ /N/); 
+        my $orig_id=$line[0];
+
+        if($options{'D'}){
+            $line[0]=$reid{$line[0]};
+            next if($line[0] =~ /_x0/);
+        }
+
+        if($species ne "none"){
+            next if($line[2] !~ /$species/);
+        }
+
+        next if($options{'U'} and $mapcounts{$line[0]} > 1);
+
+
+        $rb = $line[3];
+        $re = ($line[3]+length($line[4])-1);
+
+        if(not $hash{$line[2]}{'c'}){ #print $line[2]; 
+            next;
+        }
+        my $wr=0;
+        for(my $i = 1; $i <= $hash{$line[2]}{'c'}; $i++){
+            if($options{'w'}){## if consider complete precursor as mature seq
+                @scores = split(/_x/,$line[0]);
+                if($scores[$#scores] =~ /^(\d+)/){
+                    $len_sc=$1;
+                }else{
+                    die "Could not find read aboundance in id of read $line[0]\n";
+                }
+                if($options{'a'}){ ## if using umis and you still want to include PCR duplicates
+                    if($scores[$#scores] =~ /_u(\d+)/){
+                        $len_sc=$1;
+                    }else{
+                        die "Could not find total read aboundance in id of read $line[0]\n";
+                    }
+                }
+
+                $sample = $1 if($scores[0] =~ /^([a-zA-Z-\d]+)_/); ## get sample id here
+                if($options{'W'}){
+                    $len_sc /= $mapcounts{$line[0]};
+                    $wr+=$mapcounts{$line[0]} if($mapcounts{$line[0]}  > 1);
+                } ## weighing reads here
+
+
+
+
+                $hash{$line[2]}{$i}{'score'}+= $len_sc; ## hash of pre -> mature -> score
+                $hash_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                $total{$sample}+=$len_sc;
+                $total_t+=$len_sc;
+#                print "$line[2] ==== $line[0]\t$len_sc\n";
+                $matched = 1;
+                $hash{$line[2]}{'r'} += $len_sc;
+                $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+                $hash_sample{$sample}{$line[2]}{'wr'}=$wr;
+
+
+            }else{
+
+                if($rb >= $hash{$line[2]}{$i}{'beg'} and $re <= $hash{$line[2]}{$i}{'end'}){
+                    ## additional check for being very stringent 
+                    if($options{'Q'} and $re < $hash{$line[2]}{$i}{'end'}-$options{'f'}){ ## if smaller then mirsequence we check for the adapter addition here 
+                        #print STDERR "$re \t $hash{$line[2]}{$i}{'end'}\t$options{'f'}\t$line[4]\t";
+                        #for my $k(keys %{$m2h{$line[2]}}){
+                        #	print STDERR $m2h{$line[2]}{$k},"\t";
+                        #}
+                        #print STDERR "\n";
+                        #die "here\n";
+                        my $found =0;
+                        for my $k(keys %{$m2h{$line[2]}}){
+                            if("$line[4]TGGAA" =~ /$m2h{$line[2]}{$k}/){$found=1;$kept_read{$orig_id}=1;}
+                        }
+
+                        next if(not $found); ## no mature sequence matched next
+                    }
+
+                    @scores = split(/_x/,$line[0]);
+                    if($scores[$#scores] =~ /^(\d+)/){
+                        $len_sc=$1;
+                        if($options{'a'} and $line[0] =~ /_u(\d+)/){
+                            $len_sc=$1;
+                        }elsif($line[0] =~ /_x(\d+)/){
+                            $len_sc=$1;
+                        }else{
+
+                        }
+                    }else{
+                        die "Could not find read abundance in id of read $line[0]\n";
+                    }
+                    if($options{'a'}){ ## if using umis and you still want to include PCR duplicates
+                        if($scores[$#scores] =~ /_u(\d+)/){
+                            $len_sc=$1;
+                        }else{
+                            die "Could not find total read abundance in id of read $line[0]\n";
+                        }
+                    }
+
+                    $sample = $1 if($scores[0] =~ /^([a-zA-Z-\d]+)_/); ## get sample id here
+                    if($options{'W'}){
+                        $len_sc /= $mapcounts{$line[0]};
+                    } ## weighing reads here
+
+                    ## here we decide if a read matches our criteria
+                    if($options{'K'} and $options{'J'}){ 
+                        if($rb == $hash{$line[2]}{$i}{'beg'} and $re == $hash{$line[2]}{$i}{'end'}){
+                            $hash{$line[2]}{$i}{'score'}+= $len_sc; ## hash of pre -> mature -> score
+                            $hash_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                        }
+                    }elsif($options{'J'}){
+                        if($rb == $hash{$line[2]}{$i}{'beg'}){ ## only count if options{'J'} or if exact 5p end is hit
+                            $hash{$line[2]}{$i}{'score'}+= $len_sc; ## hash of pre -> mature -> score
+                            $hash_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                        }
+
+                    }elsif($options{'K'}){
+                        if($re == $hash{$line[2]}{$i}{'end'}){ ## only count if options{'K'} or if exact 3p end is hit
+                            $hash{$line[2]}{$i}{'score'}+= $len_sc; ## hash of pre -> mature -> score
+                            $hash_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                        }
+                    }elsif(not $options{'K'} and not $options{'J'}){
+                        $hash{$line[2]}{$i}{'score'}+= $len_sc; ## hash of pre -> mature -> score
+                        $hash_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                    }else{
+                        print STDERR "$sample $line[2] $i not matching any options\n";
+                        die "here";
+                    }
+
+
+                    $total{$sample}+=$len_sc;
+                    $total_t+=$len_sc;
+
+                    $matched = 1;
+                    $hash{$line[2]}{'r'} += $len_sc;
+                    $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+
+
+                    if($options{'W'}){
+                        $len_sc /= $mapcounts{$line[0]};
+                        $wr+=$mapcounts{$line[0]} if($mapcounts{$line[0]} >1);
+                    } ## weighing reads here
+                    $hash_sample{$sample}{$line[2]}{'wr'}=$wr;
+                }
+            }
+        }
+
+
+        for(my $i = 1; $i <= $hash_star{$line[2]}{'c'}; $i++){
+
+            if($options{'w'}){
+                @scores = split(/x/,$line[0]);
+                if($scores[$#scores] =~ /^(\d+)/){
+                    $len_sc=$1;
+                }else{
+                    die "Could not find read abundance in id of read $line[0]\n";
+                }
+                if($options{'a'}){ ## if using umis and you still want to include PCR duplicates
+                    if($scores[$#scores] =~ /_u(\d+)/){
+                        $len_sc=$1;
+                    }else{
+                        die "Could not find total read abundance in id of read $line[0]\n";
+                    }
+                }
+                $sample = $1 if($scores[0] =~ /^([a-zA-Z-\d]+)_/); ## get sample id here
+                if($options{'W'}){$len_sc /= $mapcounts{$line[0]};} ## weighing reads here}
+
+
+                $hash_star{$line[2]}{$i}{'score'}+= $len_sc;
+                $hash_star_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                $matched = 1;
+
+                $hash{$line[2]}{'r'} += $len_sc;
+                $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+            }else{
+
+                if($rb >= $hash_star{$line[2]}{$i}{'beg'} and $re <= $hash_star{$line[2]}{$i}{'end'}){
+                    ##if($rb >= $hash_star{$line[2]}{$i}{'beg'} and $re <= $hash_star{$line[2]}{$i}{'end'}){
+                    @scores = split(/x/,$line[0]);
+                    $sample = $1 if($scores[0] =~ /^([a-zA-Z-\d]+)_/); ## get sample id here
+                    $len_sc = $scores[$#scores];
+                    if($options{'a'} and $line[0] =~ /_u(\d+)/){
+                        $len_sc=$1;
+                    }elsif($line[0] =~ /_x(\d+)/){
+                        $len_sc=$1;
+                    }else{
+                    }
+
+                    if($options{'W'}){$len_sc /= $mapcounts{$line[0]};} ## weighing reads here}
+                    $hash_star{$line[2]}{$i}{'score'}+= $len_sc;
+                    $hash_star_sample{$sample}{$line[2]}{$i}{'score'}+= $len_sc;
+                    $total{$sample}+=$len_sc;
+                    $total_t+=$len_sc;
+
+                    $hash{$line[2]}{'r'} += $len_sc;
+                    $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+
+                    $matched = 1;
+
+                }
+            }
+        }
+        if(not $matched){
+            @scores = split(/x/,$line[0]);
+            $len_sc=$scores[$#scores];
+            if($options{'a'} and $line[0] =~ /_u(\d+)/){
+                $len_sc=$1;
+            }elsif($line[0] =~ /_x(\d+)/){
+                $len_sc=$1;
+            }else{
+
+            }
+
+            if($options{'Q'}){ ## if smaller then mirsequence we check for the adapter addition here
+                my $found =0;
+                for my $k(keys %{$m2h{$line[2]}}){
+                    if($line[4] =~ /$m2h{$line[2]}{$k}/){$found=1;$kept_read{$orig_id}=1;}
+                }
+                next if(not $found); ## no mature sequence matched next
+            }
+
+            $sample = $1 if($scores[0] =~ /^([a-zA-Z-\d]+)_/); ## get sample id here
+            if($options{'W'}){$len_sc /= $mapcounts{$line[0]};} ## weighing reads here}
+            $hash{$line[2]}{'r'} += $len_sc;
+            $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+        }
+    }
+}
+
+sub PrintExpressionValues{
+    my $mat;
+
+    open OUT1,">$outdir/miRNA_expressed.csv";
+#    open OUT1B,">miRNAs_expressed_$time.csv";
+    open OUT2,">$outdir/miRNA_not_expressed.csv";
+    print OUT1 "#miRNA\tread_count\tprecursor\n";
+#    print OUT1B "#miRNA\tread count\tprecursor\n";
+    print OUT2 "#miRNA\tread_count\n";
+
+    my %seen;
+    my %not_seen;
+
+
+
+    ## check which mature sequences have a mapped read and which not;
+    for my $pkey(sort keys %hash){
+        if($species ne "none"){
+            next if($pkey !~ /$species/);
+        }
+        for(my $i = 1; $i <= $hash{$pkey}{'c'}; $i++){
+            if($hash{$pkey}{$i}{'score'}){
+                print OUT1 "$hash{$pkey}{$i}{'mature'}\t$hash{$pkey}{$i}{'score'}\t$pkey\n";
+#                print OUT1B "$hash{$pkey}{$i}{'mature'}\t$hash{$pkey}{$i}{'score'}\t$pkey\n";
+            }else{
+                print OUT2 "$hash{$pkey}{$i}{'mature'}\t0\n";
+            }
+            if($hash{$pkey}{$i}{'score'} == 0){
+                print OUT1 "$hash{$pkey}{$i}{'mature'}\t$hash{$pkey}{$i}{'score'}\t$pkey\n";
+#                print OUT1B "$hash{$pkey}{$i}{'mature'}\t$hash{$pkey}{$i}{'score'}\t$pkey\n";
+            }
+        }
+
+    }
+
+    ## now for the star sequences
+
+    for my $pkey(sort keys %hash_star){
+        if($species ne "none"){
+            next if($pkey !~ /$species/);
+        }
+        for(my $i = 1; $i <= $hash_star{$pkey}{'c'}; $i++){
+            if($hash_star{$pkey}{$i}{'score'}){
+                print OUT1 "$hash_star{$pkey}{$i}{'mature'}\t$hash_star{$pkey}{$i}{'score'}\t$pkey\n";
+#                print OUT1B "$hash_star{$pkey}{$i}{'mature'}\t$hash_star{$pkey}{$i}{'score'}\t$pkey\n";
+            }else{
+                print OUT2 "$hash_star{$pkey}{$i}{'mature'}\t0\n";
+            }
+        }
+    }
+    print STDERR "expressed miRNAs are written to $outdir/miRNA_expressed.csv\n";
+    print STDERR "not expressed miRNAs are written to $outdir/miRNA_not_expressed.csv\n";
+    close OUT1;
+    #close OUT1B;
+    close OUT2;
+}
+
+sub PrintExpressionValuesSamples{
+    $total_t=1000000;
+
+    open OUTG,">miRNAs_expressed_all_samples_$time.csv";
+    print OUTG "#miRNA\tread_count\tprecursor\ttotal";
+
+    for my $sample(sort keys %hash_sample){
+        next if($sample =~ /config/);
+        print OUTG "\t$sample" if(not $options{'Z'});
+        if($options{'X'}){print OUTG "\t#wr_$sample";}
+    }
+
+
+    if(not $opt_R){
+        for my $sample(sort keys %hash_sample){
+            next if($sample =~ /config/);
+            print OUTG "\t$sample(RPM)";
+        }
+    }
+
+    print OUTG "\n";
+    ## trying to sort keys here
+    my %shash=();
+    for my $p (keys %hash){
+        $shash{$p}=0 if(not defined $shash{$p});
+        for my $v(keys %{$hash{$p}}){
+            next if ($v !~ /\d/);
+            if($hash{$p}{$v}{'score'} > $shash{$p}){ $shash{$p} = $hash{$p}{$v}{'score'};}
+        }
+    }
+
+    for my $pkey (sort {$shash{$b} <=> $shash{$a}} keys %shash){
+#	for my $pkey (sort {$hash{$b}{1}{'score'} <=> $hash{$a}{1}{'score'}} keys %hash){
+#		print "$pkey $hash{$pkey}{1}{'score'}\n";
+        if($species ne "none"){
+            next if($pkey !~ /$species/);
+        }
+
+        if($options{'w'}){
+            my $i = 1;
+            print OUTG "$hash{$pkey}{$i}{'mature'}\t$hash{$pkey}{$i}{'score'}\t$pkey\t$hash{$pkey}{$i}{'score'}";
+
+            if(not $options{'Z'}){
+                for my $sample(sort keys %hash_sample){
+                    next if($sample =~ /config/);
+                    if($hash_sample{$sample}{$pkey}{$i}{'score'}){
+                        #print OUTG "\t$hash_sample{$sample}{$pkey}{$i}{'score'}";
+                        print OUTG "\t$hash_sample{$sample}{$pkey}{$i}{'score'}";
+                    }else{
+                        print OUTG "\t0";
+                    }
+
+                    if($options{'X'}){if(not $hash_sample{$sample}{$pkey}{'wr'}){ print OUTG "\t0";}else{print OUTG "\t$hash_sample{$sample}{$pkey}{'wr'}";}}
+                }
+            }
+            if(not $opt_R){	
+                for my $sample(sort keys %hash_sample){
+                    next if($sample =~ /config/);
+                    if($hash_sample{$sample}{$pkey}{$i}{'score'}){
+                        #print OUTG "\t$hash_sample{$sample}{$pkey}{$i}{'score'}";
+
+                        print OUTG "\t",sprintf("${pf}",$total_t*$hash_sample{$sample}{$pkey}{$i}{'score'}/($total{$sample})     );
+                    }else{
+                        print OUTG "\t0";
+                    }
+                }
+            }
+
+
+
+            print OUTG "\n";
+
+
+        }else{
+            for(my $i = 1; $i <= $hash{$pkey}{'c'}; $i++){
+                printf OUTG ("%s\t${pf}\t%s\t${pf}",$hash{$pkey}{$i}{'mature'},$hash{$pkey}{$i}{'score'},$pkey,$hash{$pkey}{$i}{'score'});
+
+                if(not $options{'Z'}){	
+                    for my $sample(sort keys %hash_sample){
+                        next if($sample =~ /config/);
+                        #if(not $hash_sample{$sample}{$pkey}{$i}{'score'}){ ## error is here, why are these id in at all?
+                        #	print STDERR "xxxxxxxxx $sample  $pkey  $i ---\n";
+                        #}
+                        if($hash_sample{$sample}{$pkey}{$i}{'score'}){
+#						print OUTG "\t$hash_sample{$sample}{$pkey}{$i}{'score'}";
+                            printf OUTG ("\t${pf}",$hash_sample{$sample}{$pkey}{$i}{'score'});
+                        }else{
+                            print OUTG "\t0";
+                        }
+                        if($options{'X'}){if(not $hash_sample{$sample}{$pkey}{'wr'}){ print OUTG "\t0";}else{print OUTG "\t$hash_sample{$sample}{$pkey}{'wr'}";}}
+                    }
+                }
+
+                if(not $opt_R){					
+                    for my $sample(sort keys %hash_sample){
+                        next if($sample =~ /config/);
+                        if($hash_sample{$sample}{$pkey}{$i}{'score'}){
+                            #print OUTG "\t$hash_sample{$sample}{$pkey}{$i}{'score'}";
+                            printf OUTG ("\t${pf}",$total_t*$hash_sample{$sample}{$pkey}{$i}{'score'}/$total{$sample});
+                        }else{
+                            print OUTG "\t0";
+                        }
+                    }
+                }
+
+                print OUTG "\n";
+            }
+        }
+
+    }
+    if($options{'s'}){
+        for my $pkey (sort keys %hash_star){
+            if($species ne "none"){
+                next if($pkey !~ /$species/);
+            }
+            my $star_keys = scalar keys %hash_star_sample;
+            if($star_keys > 0){
+                if($options{'w'}){
+                    my $i =1;
+
+
+                    print OUTG "$hash_star{$pkey}{$i}{'mature'}\t$hash_star{$pkey}{$i}{'score'}\t$pkey\t$hash_star{$pkey}{$i}{'score'}";
+                    for my $sample(sort keys %hash_star_sample){
+                        next if($sample =~ /config/);
+                        if($hash_star_sample{$sample}{$pkey}{$i}{'score'}){
+#					print OUTG "\t$hash_star_sample{$sample}{$pkey}{$i}{'score'}";
+                            print OUTG "\t$hash_star_sample{$sample}{$pkey}{$i}{'score'}";
+                        }else{
+                            print OUTG "\t0";
+                        }
+
+                    }
+
+                    if(not $opt_R){					
+                        for my $sample(sort keys %hash_star_sample){
+                            next if($sample =~ /config/);
+                            if($hash_star_sample{$sample}{$pkey}{$i}{'score'}){
+#					print OUTG "\t$hash_star_sample{$sample}{$pkey}{$i}{'score'}";
+                                print OUTG "\t",sprintf("${pf}",$total_t*$hash_star_sample{$sample}{$pkey}{$i}{'score'}/$total{$sample});
+                            }else{
+                                print OUTG "\t0";
+                            }
+
+                        }
+                    }
+
+
+                    print OUTG "\n";
+                }else{
+                    for(my $i = 1; $i <= $hash_star{$pkey}{'c'}; $i++){
+                        print OUTG "$hash_star{$pkey}{$i}{'mature'}\t$hash_star{$pkey}{$i}{'score'}\t$pkey\t$hash_star{$pkey}{$i}{'score'}";
+                        for my $sample(sort keys %hash_star_sample){
+                            next if($sample =~ /config/);
+                            if($hash_star_sample{$sample}{$pkey}{$i}{'score'}){
+
+                                print OUTG "\t$hash_star_sample{$sample}{$pkey}{$i}{'score'}";
+                            }else{
+                                print OUTG "\t0";
+                            }
+                        }
+
+                        if(not $opt_R){					
+                            for my $sample(sort keys %hash_star_sample){
+                                next if($sample =~ /config/);
+                                if($hash_star_sample{$sample}{$pkey}{$i}{'score'}){
+
+                                    print OUTG "\t",sprintf("${pf}",$total_t*$hash_star_sample{$sample}{$pkey}{$i}{'score'}/$total{$sample});
+                                }else{
+                                    print OUTG "\t0";
+                                }
+
+                            }
+                        }
+
+                        print OUTG "\n";
+                    }
+                }
+            }
+
+        }
+    }
+    close OUTG;
+}
+
+
+
+sub CreateOutputMRD{
+    my %exprs;
+    my @ex;
+    ## everything goes in here stars and other stuff
+    open IN,"<$outdir/miRNA_expressed.csv" or die "File $outdir/miRNA_expressed.csv not found";
+    while(<IN>){
+        chomp;
+        next if(/precursorID/);
+        @ex = split("\t");
+        $exprs{$ex[2]}{$ex[0]} = $ex[1]; ## precursor-entitiy = count
+    }
+    close IN;
+
+    chdir($outdir);
+    open OUT,">miRBase.mrd" or die "could not create file $outdir/miRBase.mrd\n";
+    ## get mature mappings
+    my ($mature,$star,$reads);
+
+
+    my @line;
+    my @tmp;
+
+    my $ltmp;
+
+    my $id1= '';
+    my $id2='';
+    open IN,"<${name1}_mapped.arf";
+    while(<IN>){
+        $id1= '';
+        $id2='';
+        @line = split(/\t/);
+
+        if($species ne "none"){
+            next if($line[5] !~ /$species/);
+        }
+
+
+        $id1 = $line[0]; ## this is the mature ID
+        $id2 = $line[5]; ## this is the precursor ID
+
+        ## remove multiple endings if ambigous just for matching with precursor
+        $id1 =~ s/\-5p//g;
+        $id1 =~ s/\-3p//g;
+
+        ## here is assumed that multiple precursor ids have 3 - in their id, seems to be ok so far
+        if($id2 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+            $id2 = $1;
+        }
+        next if(not $options{'k'} and $id1 !~ /$id2/i and $id2 !~ /$id1/i); ## if k then stringent checking is on ;may this can be removed
+
+        #	die join("\t",@line) if($id1 =~ /trna8_459/);
+
+        if($id1 =~ /trna(\d+)/){
+            my $t1=$1;
+            if($id2 =~ /trna(\d+)/){
+                my $t2=$1;
+                next if($t2 != $t1 and not $options{'k'});
+            }
+        }
+
+        if(not $hash{$line[5]}{'struct'}){
+            #die $line[5] if(not $hash{$line[5]}{'seq'});
+            @tmp  = split(//,"f" x length($hash{$line[5]}{'seq'}));
+        }else{
+            @tmp  = split(//,$hash{$line[5]}{'struct'});
+        }
+
+        if(not $options{'O'}){	
+            ## this here gets complicated when two times is a 5p and 3p there
+            #
+            if($line[0] =~ /5p/){
+                for(my $i = $line[7]-1; $i <= $line[8]-1; $i++){
+                    $tmp[$i] = '5';
+                }
+                if($line[0] =~ /trna\d+/){
+                    for(my $i = $line[8]-3; $i <= $line[8]-1; $i++){
+                        $tmp[$i] = 'l';
+                    }
+                }
+
+            }elsif($line[0] =~ /3p/){
+                for(my $i = $line[7]-1; $i <= $line[8]-1; $i++){
+                    $tmp[$i] = '3';
+                }
+
+                if($line[0] =~ /trna\d+/){
+                    for(my $i = $line[7]-1; $i <= $line[7]+1; $i++){
+                        $tmp[$i] = 'l';
+                    }
+                }
+
+            }else{
+                for(my $i = $line[7]-1; $i <= $line[8]-1; $i++){
+                    $tmp[$i] = 'M';
+                }
+            }
+
+            ### put this somewhere else more clever but for now it will be fine
+        }else{
+            my $slen=length($hash{$line[5]}{'seq'});
+            @tmp  = split(//,"P" x $slen);
+            my $os=0;
+            for my $mir(keys %{$offset{$line[5]}}){
+                $os=$offset{$line[5]}{'offset'};
+                if($mir eq 'offset'){
+
+                    my $osb=0;
+                    my $ose=0;
+                    if($offset{$line[5]}{$mir} =~ /(\d+),(\d+)/){
+                        $osb=$1;
+                        $ose=$2;
+                    }else{
+                        $osb=$offset{$line[5]}{$mir};
+                        $ose=$osb;
+                    }
+
+                    my $i=0;
+                    while($i < $ose or $i < $osb){
+                        if($i<$osb){
+                            $tmp[$i]='f';
+                        }
+                        if($i < $ose){
+                            $tmp[$#tmp-$i]='f';
+                        }
+                        $i++;
+                    }
+                }else{
+                    for(my $i = $offset{$line[5]}{$mir}{'s'}+$os; $i <= $offset{$line[5]}{$mir}{'e'}+$os; $i++){
+                        $tmp[$i] = 'M';
+                    }
+                }
+            }	
+        }
+
+        $hash{$line[5]}{'struct'} = join('',@tmp);
+    }
+    close IN;
+
+
+    ## now treat the star sequences if given
+
+    if($options{'s'}){
+        $star=`bowtie_to_arf 100 ${name3}_mapped.bwt ${name3}_mapped.arf`;
+        open IN,"<${name3}_mapped.arf";
+        while(<IN>){
+            @line = split(/\t/);
+            if($species ne "none"){
+                next if($line[5] !~ /$species/);
+            }
+
+            $id1= '';
+            $id2='';
+            @line = split(/\t/);
+
+            $id1 = $line[0]; ## this is the mature ID
+            $id2 = $line[5]; ## this is the precursor ID
+
+            ## remove multiple endings if ambigous just for matching with precursor
+            $id1 =~ s/\*//g;
+            $id1 =~ s/\-5p//g;
+            $id1 =~ s/\-3p//g;
+            if($id1 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+                $id1 = $1;
+            }
+            if($id2 =~/^(\w+\-\w+\-\w+)\-\d+$/){
+                $id2 = $1;
+            }
+
+            next if(not $options{'k'} and $id1 !~ /$id2/i and $id2 !~ /$id1/i); ## maybe this can be removed
+            if($id1 =~ /trna(\d+)/){
+                my $t1=$1;
+                if($id2 =~ /trna(\d+)/){
+                    my $t2=$1;
+                    next if($t2 != $t1 and not $options{'k'});
+                }
+            }
+            @tmp  = split(//,$hash{$line[5]}{'struct'});
+
+            my $len=($line[8]-1)-($line[7]-1);
+            substr($hash{$line[5]}{'struct'},$line[7]-1,$len,"S"x$len);
+
+        }
+        close IN;
+    }
+
+    ## create loop entrys in struct if there is a mature and star sequence
+    my @loop;
+    my $found = 0;
+    my $loop =0;
+    if($options{'s'}){
+        for my $k(keys %hash){
+            @loop = split(//,$hash{$k}{'struct'});
+            for(my $i=0; $i< scalar @loop; $i++){
+                if($loop[$i] ne 'f' and $found == 0){
+                    $found = 1;
+                }elsif($loop[$i] eq 'f' and $found == 1){
+                    $loop = 1;
+                }elsif($loop[$i] ne 'f' and $found == 1 and $loop ==1){
+                    $found = 2;
+                }else{}
+            }
+            ## set loop right now if $found = 2;
+            if($found == 2 ){
+
+                $found = 0;
+                $loop =0;
+                for(my $i=0; $i< scalar @loop; $i++){
+                    if($loop[$i] ne 'f' and $found == 0){
+                        $found = 1;
+                    }elsif($loop[$i] eq 'f' and $found == 1 and $loop <2 ){
+                        $loop[$i] = 'l';
+                        $loop = 1;
+                    }elsif($loop[$i] ne 'f' and $found == 1 and $loop > 0){
+                        $found = 2;
+                    }else{}
+                }
+            }
+            $hash{$k}{'struct'} = join('',@loop);
+        }
+    }
+
+
+    open IN,"bowtie_to_arf 100 ${name2}_mapped.bwt 1|" or die "Stream not found\n";
+    my (@rseq,@qseq);
+    my $counter;
+    my $col1_width = 50;
+    my $spacer;
+
+
+
+
+    ## process the reads now
+    print STDERR "Reading mapped reads file\n";
+    my @rc;
+    while(<IN>){
+        chomp;
+        next if(/^\s*$/);
+
+        @line = split(/\t/);
+        next if($options{'Q'} and not $kept_read{$line[0]}); ## works
+
+        ## ok here we reassing the counts if we give the proper file # but we dont change the id in the miRBase.mrd file, this is still the original one
+        if($options{'D'}){$line[0]=$reid{$line[0]};next if($line[0] =~ /_x0/);} ## works
+
+        ## exclude all multimappers here if desired
+        next if($options{'U'} and $mapcounts{$line[0]} > 1);
+
+        if($species ne "none"){
+            next if($line[5] !~ /$species/);
+        }
+
+        my $rc=0;
+        $rc=$1 if($line[0]=~ /_x(\d+)/);
+        if($options{'a'} and $line[0] =~ /_u(\d+)/){
+            $rc=$1;
+        }
+
+
+        $hash{$line[5]}{'reads'}{'c'}++;
+        $hash{$line[5]}{'reads'}{'tot'}+= $rc; ## sum up total read count for this precursor
+        $counter = $hash{$line[5]}{'reads'}{'c'};
+
+        $hash{$line[5]}{'reads'}{$counter} = $_; ## all lines of mapping in hash now
+    }
+    close IN;
+    print STDERR "generating mrd file now\n";	
+
+    for my $k1(sort keys %hash){
+        if($species ne "none"){
+            next if($k1 !~ /$species/);
+        }
+        next if(not $hash{$k1}{'reads'}{'tot'});	
+        $hash{$k1}{'seq'} =~ tr/ACGTU/acguu/;
+
+        my (@str,@str1);
+
+        ## if not F given then we get a dot bracket notation, otherwise we just use the dots. This will speed up the quantification
+        if(!$options{'F'}){
+            my $ret=`RNAfold --help |grep RNAfold |grep 2`;
+            my $add='';
+            $add='-' if($ret);
+            @str=`echo $hash{$k1}{'seq'}| RNAfold ${add}-noPS` ;
+            @str1 = split(/\s+/,$str[1]);
+        }else{
+            $str1[0]="." x length($hash{$k1}{'seq'});
+        }
+
+        ## not completely correct because miRNAs with same precursor have different stars
+        print OUT ">$k1\n";
+        $spacer = " " x ($col1_width - length('total read count'));
+
+        ## print total read count to precursor
+#NEW
+#		next if(not defined $hash{$k1}{'r'}); ## if we dont have any reads here we skip it ## now working with the skipping
+        if(not defined $hash{$k1}{'r'}){$hash{$k1}{'r'}=0;}
+        print OUT "total read count$spacer",$hash{$k1}{'r'},"\n"; ### mmm error is here and occurs if no mature could be mapped
+        ## so we need to ignore these mature ids completely
+
+        ## print all mature ids given in mature file for this precuror
+        for my $k2 (keys %{$hash{$k1}}){
+            next if($k2 !~ /^\d+$/);    ## skip all keys that are not a number
+            my $mat = $hash{$k1}{$k2}{'mature'};
+            $spacer = " " x ($col1_width - length("$mat read count"));
+            print OUT "$mat read count$spacer$hash{$k1}{$k2}{'score'}\n";
+        }
+
+        for my $k2 (keys %{$hash_star{$k1}}){
+            next if($k2 !~ /^\d+$/);    ## skip all keys that are not a number
+            my $mat = $hash_star{$k1}{$k2}{'mature'};
+            $spacer = " " x ($col1_width - length("$mat read count"));
+            print OUT "$mat read count$spacer$hash_star{$k1}{$k2}{'score'}\n";
+        }
+        $spacer = " " x ($col1_width - length('remaining read count'));
+
+        ###
+#new
+        my $rrc=$hash{$k1}{'r'};
+#old		my $rrc=$hash{$k1}{'reads'}{'tot'};
+
+        for(my $i = 1; $i <= $hash{$k1}{'c'}; $i++){
+            $rrc-=$hash{$k1}{$i}{'score'};
+        }
+        for(my $i = 1; $i <= $hash_star{$k1}{'c'}; $i++){
+            $rrc-=$hash_star{$k1}{$i}{'score'};
+        }
+        print OUT "remaining read count$spacer",$rrc,"\n";
+
+
+        $spacer = " " x ($col1_width - length('exp'));
+        print OUT "exp$spacer$hash{$k1}{'struct'}\n";
+        #die $k1 if(not $hash{$k1}{'struct'});
+        $spacer = " " x ($col1_width - length('pri_seq'));
+        print OUT "pri_seq$spacer$hash{$k1}{'seq'}\n";
+        $spacer =   " " x ($col1_width - length('pri_struct'));
+        print OUT "pri_struct$spacer$str1[0]\t#MM\n";
+
+        my @reads_arr;
+        my %reads_hash;
+
+        #my @pseq = split(//,lc $hash{$k1}{'seq'});
+
+        ## put all reads of key in an array then use mirdeep2 routine
+        for my $k2(keys %{$hash{$k1}{'reads'}}){
+
+            next if($k2 eq 'c');
+            push(@reads_arr,$hash{$k1}{'reads'}{$k2});
+        }
+
+        my $lr = scalar @reads_arr;
+        $rrc = 0;
+
+
+        ## much more efficient now
+        foreach(@reads_arr){
+            if(/^(\S+)\s+\d+\s+\d+\s+\d+\s+(\S+)\s+\S+\s+\d+\s+(\d+)\s+(\d+)\s+\S+\s+\S+\s+(\d+)\s+(\S+)\s*.*$/){
+                $rrc++;
+                $reads_hash{$rrc}{"id"}=$1;
+                $reads_hash{$rrc}{"seq"}=lc($2);
+                $reads_hash{$rrc}{"seq"}=~ tr/t/u/;
+                $reads_hash{$rrc}{"beg"}=$3;
+                $reads_hash{$rrc}{"end"}=$4;
+                $reads_hash{$rrc}{"mm"}=$5;
+                my $mm=$6;
+                #die $reads_hash{$rrc}{"M"};
+                if($reads_hash{$rrc}{"mm"}>0){
+                    my $char;
+                    my $pos;
+                    while($mm =~ /M/g){
+                        $pos=$-[0];
+                        $char=substr($reads_hash{$rrc}{"seq"},$pos,1);
+                        substr($reads_hash{$rrc}{"seq"},$pos,1,uc($char));
+                    }
+                }
+
+            }
+        }
+
+
+        ## sorted keys by begin postion
+        my @skeys = sort { $reads_hash{$a}{"beg"} <=> $reads_hash{$b}{"beg"} } keys %reads_hash;
+        my @elist; # final sorted array
+
+        my $first = $reads_hash{$skeys[0]}{"beg"};  ## all keys that have same begin position should match this value
+        my %rorder;                                 ## temporary hash to store all keys with same begin position
+
+        for(my $j = 0; $j < scalar @skeys; $j++){
+            if($reads_hash{$skeys[$j]}{"beg"} eq $first){
+                $rorder{$j} = $reads_hash{$skeys[$j]}{"end"};  ## insert key and end position to hash
+            }else{                                             ## if new begin position
+                $first = $reads_hash{$skeys[$j]}{"beg"};
+                for(sort {$rorder{$a} <=> $rorder{$b}} keys %rorder){ ## sort hash keys by end position
+                    push(@elist,$skeys[$_]);                          ## attend keys to elist
+                }
+                for(keys %rorder){delete $rorder{$_};}                ## delete hash
+                $rorder{$j} = $reads_hash{$skeys[$j]}{"end"};
+            }
+        }
+
+        for(sort {$rorder{$a} <=> $rorder{$b}} keys %rorder){
+            push(@elist,$skeys[$_]);
+        }
+
+        foreach(@elist){                                                       ## output exists.
+            my $rseq  = $reads_hash{$_}{'seq'};
+            #	$rseq =~ tr/t/u/;
+            my $bef="." x ($reads_hash{$_}{'beg'}-1);
+            my $after = "." x ($hash{$k1}{'end'} - $reads_hash{$_}{"end"});
+            my $spacer = " " x ($col1_width - length($reads_hash{$_}{'id'}));
+            my @sread;
+            my $bshift=0;
+
+            print OUT "$reads_hash{$_}{'id'}$spacer$bef$rseq$after\t$reads_hash{$_}{'mm'}\n";
+        }
+        print OUT "\n\n\n";
+
+    } ## close $for my $k1
+    close OUT;
+    chdir("../../");
+}## close sub
+
+sub check_install{
+    my $a=`which quantify`;
+    my $bn=`dirname $a`;
+    chomp $bn;
+    if(not -f "$bn/../install_successful"){
+        die "Please run the install.pl script first before using quantify
+        The install script is located in ",substr($bn,0,length($bn)-3)," so just do
+
+        cd $bn
+        perl install_quant.pl
+
+        ";
+    }
+}
+
+sub fuseC{
+    open IN,"../../$options{'r'}" or die "config file not found\n";
+    print STDERR "Attention: Your separate reads file must have distinct 3 lettercodes at the beginning of their fasta header\n";
+    my @f;
+    my @l;
+    while(<IN>){
+        chomp;
+        @l=split();
+        if(length($l[0]) == 3 ){
+            if($l[1] !~ /^\//){
+                $l[1]="../../$l[1]";
+            }
+            push(@f,$l[1]);
+        }elsif(length($l[1]) == 3){
+            if($l[0] !~ /^\//){
+                $l[0]="../../$l[0]";
+            }
+            push(@f,$l[0]);
+        }else{
+            die "Your config file contains not enough 3 letter codes in line $_\n";
+        }
+    }
+    close IN;
+    return join(",",@f);
+}
+
+sub dhash{
+    my ($d)=@_;
+    $$d{u}="list all values allowed for the species parameter that have an entry at UCSC";
+    $$d{M}="use alternative mature to precursor mapping, -n 0,-l 15, -e 120\n";
+    $$d{p}="miRNA precursor sequences from miRBase";
+    $$d{m}="miRNA sequences from miRBase";
+    $$d{P}="specify this option of your mature miRNA file contains 5p and 3p ids only";
+    $$d{r}="your read sequences";
+    $$d{C}="if file specified then file at option -r is a config file";
+    $$d{c}="config.txt file with different sample ids... or just the one sample id";
+    $$d{s}="optional star sequences from miRBase";
+    $$d{t}="e.g. Mouse or mmu";
+    $$d{y}="optional otherwise its generating a new one";
+    $$d{d}="if parameter given pdfs will not be generated, otherwise pdfs will be generated";
+    $$d{o}="if parameter is given reads were not sorted by sample in pdf file, default is sorting";
+    $$d{k}="also considers precursor-mature mappings that have different ids, eg let7c";
+    $$d{n}="do not do file conversion again";
+    $$d{x}="do not do mapping against precursor again";
+    $$d{g}="number of allowed mismatches when mapping reads to precursors, default 1";
+    $$d{e}="number of nucleotides upstream of the mature sequence to consider, default 2";
+    $$d{f}="number of nucleotides downstream of the mature sequence to consider, default 5";
+    $$d{j}="do not create an output.mrd file and pdfs if specified";
+    $$d{w}="considers the whole precursor as the 'mature sequence'";
+    $$d{W}="read counts are weighed by their number of mappings. e.g. A read maps twice so each position gets 0.5 added to its read profile";
+    $$d{U}="use only unique read mappings; Caveat: Some miRNAs have multiple precursors. These will be underestimated in their expression since the multimappers are excluded";
+    $$d{F}="Fast mode, dont run RNAfold in here for structure prediction. Using with option -d will speed up the whole thing alot!";
+    $$d{R}="dont calculate the RPMs in output. e.g. when using UMIs data does not need to be normalized";
+    $$d{Z}="only output RPMs in output ";
+    $$d{X}="only works when W is given and will output also the number of weighed reads!";
+    $$d{A}="if given, then RNA secondary structures will not be part of the pdf output";
+    $$d{N}="dont check read file for format compliance - speeds up things but may give unpredictable results if format is not ok";
+    $$d{T}="Number of threads to use for mapping";
+    $$d{S}="shortend html output, no sequences given in output";
+    $$d{O}="file with miRNA offsets describing where mature and star are starting in precursor";
+    $$d{Y}="if given then pdfs in make_html3 will be remade no matter if the pdf exists already            ";
+    $$d{G}="if given then pdfs will only contain the coverage plots";
+    $$d{B}="put 5p/3p read counts in output in same column";
+    $$d{a}="use the _uINT tag instead of the -xINT tag for counting reads ";
+    $$d{J}="count only mature reads that have the exact 5 prime end (no isomirs) (defined -e 0)";
+    $$d{K}="count only exact 3 prime ends (no variation at the 3p end allowed) (defined by -f 0 ). Using J,K and g=1 and -e 0 -f 0 will count only the exact mature sequence with no MM";
+    $$d{H}="allows 'N's in sequences";
+}	
+
+__DATA__
+spu	S.purpuratus
+ptc	P.trichocarpa
+csi	C.sinensis
+rrv	R.monkey
+ksh	K.sarcoma-associated
+lla	L.lagotricha
+rlc	R.lymphocryptovirus
+ddi	D.discoideum
+pde	P.densata
+dya	D.yakuba
+sof	S.officinarum
+egu	E.guineensis
+lgi	L.gigantea
+chi	C.hircus
+gra	G.raimondii
+lva	L.variegatus
+bol	B.oleracea
+ccr	C.carpio
+aqu	A.queenslandica
+tur	T.urticae
+cme	C.melo
+hhi	H.hippoglossus
+cfa	dog
+smr	S.maritima
+psj	P.sojae
+mcm	M.cytomegalovirus
+ppy	P.pygmaeus
+cte	C.teleta
+mja	M.japonicus
+ssy	S.syndactylus
+amg	A.mangium
+xla	X.laevis
+aja	A.jamaicensis
+mcv	M.cell
+lmi	L.migratoria
+gma	G.max
+aqc	A.caerulea
+atr	A.trichopoda
+nve	N.vectensis
+cbn	C.brenneri
+pab	P.abies
+pbi	P.bieti
+ppc	P.pacificus
+ghr	G.hirsutum
+hvu	H.vulgare
+hbr	H.brasiliensis
+sci	S.ciliatum
+mes	M.esculenta
+dps	D.pseudoobscura
+peu	P.euphratica
+ptr	chimp
+hvs	H.saimiri
+blv	B.leukemia
+hru	H.rufescens
+hiv	H.immunodeficiency
+sja	C.japonica
+sme	S.mediterranea
+prd	P.redivivus
+hpe	H.petiolaris
+tni	Tetraodon
+tae	T.aestivum
+mtr	M.truncatula
+hex	H.exilis
+sv4	S.virus
+mmu	mouse
+tca	T.castaneum
+gsa	G.salaris
+hci	H.ciliaris
+rgl	R.glutinosa
+pra	P.ramorum
+pol	P.olivaceus
+hcm	H.cytomegalovirus
+bcy	B.cylindrica
+hsa	human
+cin	C.intestinalis
+efu	E.fuscus
+emu	E.multilocularis
+cca	C.cardunculus
+dev	D.enteritis
+pmi	P.miniata
+ppt	P.patens
+xbo	X.bocki
+cla	C.lacteus
+aly	A.lyrata
+crm	C.remanei
+aca	A.carolinensis
+ath	A.thaliana
+aae	A.aegypti
+ttu	T.turgidum
+oha	O.hannah
+pti	P.tricornutum
+api	A.pisum
+isc	I.scapularis
+ppe	P.persica
+odi	O.dioica
+age	A.geoffroyi
+cqu	C.quinquefasciatus
+dmo	D.mojavensis
+mdv	M.disease
+ngi	N.giraulti
+aau	A.auriculiformis
+pxy	P.xylostella
+tre	T.retusa
+dwi	D.willistoni
+aga	A.gambiae
+sly	S.lycopersicum
+vvi	V.vinifera
+mdo	M.domestica
+far	F.arundinacea
+gga	Chicken
+dpu	D.pulex
+lca	Cat
+mdm	M.domestica
+cpa	C.papaya
+ebv	E.Barr
+sha	S.harrisii
+rmi	R.microplus
+eca	Horse
+ccl	C.clementina
+bfv	B.foamy
+stu	S.tuberosum
+dse	D.sechellia
+cgr	C.griseus
+dgr	D.grimshawi
+zma	Z.mays
+hbv	H.B
+bkv	B.polyomavirus
+bdi	B.distachyon
+ctr	C.trifoliata
+pma	P.marinus
+rco	R.communis
+lja	L.japonicus
+tgu	T.guttata
+bbe	B.belcheri
+str	S.ratti
+tch	T.chinensis
+der	D.erecta
+ggo	G.gorilla
+mml	M.mulatta
+hma	H.magnipapillata
+dpe	D.persimilis
+jcv	J.polyomavirus
+sbi	S.bicolor
+lco	L.complicata
+dsi	D.simulans
+vun	V.unguiculata
+prv	P.virus
+ssa	S.salar
+dre	Zebrafish
+gpy	G.pyramidata
+esi	E.siliculosus
+ssl	S.sclarea
+ssp	S.sp.
+bfl	Lancelet
+bgy	B.gymnorhiza
+hco	H.contortus
+meu	M.eugenii
+bpc	B.papillomatosis
+rno	Rat
+har	H.argophyllus
+crt	C.reticulata
+ipu	I.punctatus
+ahy	A.hypogaea
+xtr	X.tropicalis
+oan	O.anatinus
+gar	G.arboreum
+mne	M.nemestrina
+csa	C.savignyi
+bna	B.napus
+pin	P.infestans
+smo	S.moellendorffii
+cre	C.reinhardtii
+nta	N.tabacum
+sko	S.kowalevskii
+sla	S.labiatus
+hvt	H.of
+hpa	H.paradoxus
+asu	A.suum
+egr	E.granulosus
+sma	S.mansoni
+oar	O.aries
+mse	M.sexta
+ame	A.mellifera
+ssc	S.scrofa
+pta	P.taeda
+tcc	T.cacao
+ocu	O.cuniculus
+bmo	B.mori
+dan	D.ananassae
+gso	G.soja
+cbr	C.briggsae
+lus	L.usitatissimum
+ola	O.latipes
+hme	H.melpomene
+han	H.annuus
+ghb	G.herbaceum
+ata	A.tauschii
+bta	cow
+cel	worm
+nvi	N.vitripennis
+dvi	D.virilis
+ilt	I.laryngotracheitis
+htu	H.tuberosus
+cln	C.lanceolata
+bra	B.rapa
+fru	Fugu
+pvu	P.vulgaris
+bhv	B.herpesvirus
+osa	O.sativa
+ppa	P.paniscus
+hhv	H.herpesvirus
+nlo	N.longicornis
+dpr	D.purpurea
+pgi	P.ginseng
+mgh	M.gammaherpesvirus
+dme	D.melanogaster
+ama	A.marina
+bma	B.malayi
+hsv	H.Simplex
