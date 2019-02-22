@@ -92,7 +92,8 @@ my $go =GetOptions ('reads|r=s' => \$options{r},
     'onecol5p3p|B' => \$options{B},
     'useumitag|a' => \$options{a},
     'exactbegin|J' => \$options{J},
-    'exactend|K' => \$options{K}
+    'exactend|K' => \$options{K},
+    'help|h' => \$options{h}
 );
 
 
@@ -208,15 +209,14 @@ if not searching in a specific species all species in your files will be analyze
 else only the species in your dataset is considered
 
 ".col($G,'[optional parameters]')."
-".col($G,'-C/--config')."                  if specified then file at option -r is a config file
+".col($G,'-C/--config')."                  if specified then the file at option -r is a config file
 ".col($G,'-u/--ucsc')."                    list all values allowed for the species parameter, many of them are not linked to UCSC Blat
 ".col($G,'-s/--star')."                    optional star sequences from miRBase
 ".col($G,'-P/--mature5p3p')."              specify this option of your mature miRNA file contains 5p and 3p ids only
 ".col($G,'-y/--tag')."                     custom tag for current run, otherwise a new one is generated
 ".col($G,'-d/--nopdf')."                   dont genereate pdfs
 ".col($G,'-o/--nosamplesort')."            dont sort reads by sample in pdf file
-".col($G,'-k/--ambiguouspm')."             also considers precursor-mature mappings that have different ids, eg let7c
-would be allowed to map to pre-let7a
+".col($G,'-k/--ambiguouspm')."             also considers precursor-mature mappings that have different ids, eg let7c would be allowed to map to pre-let7a
 ".col($G,'-n/--nofileconversion')."        dont do file conversion again
 ".col($G,'-x/--noremap')."                 dont map against precursors again
 ".col($G,'-g/--max-mismatch')."            number of allowed mismatches when mapping reads to precursors, default 1
@@ -225,9 +225,9 @@ would be allowed to map to pre-let7a
 ".col($G,'-j/--nopdf_nomrd')."             do not create an output.mrd file and pdfs if specified
 ".col($G,'-w/--whole_transcript')."        expression is determined only for sequences given by option 'p'
 ".col($G,'-W/--weighed')."                 read counts are weighed by their number of mappings. 
-e.g. A read maps twice so each position gets 0.5 added to its read profile
+                             e.g. A read maps twice so each position gets 0.5 added to its read profile
 ".col($G,'-U/--unqiue')."                  use only unique read mappings; Caveat: Some miRNAs have multiple precursors/tRNAs have plenty. 
-These will be underestimated in their expression since multimappers are excluded
+                             These will be underestimated in their expression since multimappers are excluded
 ".col($G,'-F/--nornafold')."               dont run RNAfold in here for structure prediction. Using with option -d will speed up the whole thing alot!
 ".col($G,'-R/--norpm')."                   dont calculate the RPMs in output. e.g. when using UMIs data does not need to be normalized
 ".col($G,'-Z/--onlyrpm')."                 only output RPMs in output 
@@ -243,8 +243,15 @@ These will be underestimated in their expression since multimappers are excluded
 ".col($G,'-a/--useumitag')."               use the _uINT tag instead of the _xINT tag for counting reads 
 ".col($G,'-J/--exactbegin')."              count only reads that have the exact 5 prime end (no isomirs) (defined by -e 0)
 ".col($G,'-K/--exactend')."                count only reads that have the exact 3 prime ends (no variation at the 3p end allowed). (defined by -f 0). 
+
 Using J,K and g=0 and -e 0 -f 0 will count only the mature sequence with no MM
 \n";
+
+
+if($options{'h'}){
+    die $usage;
+}
+
 
 my $opt_m='';
 
