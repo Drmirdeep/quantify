@@ -19,9 +19,9 @@ use strict;
 use warnings;
 
 ######################
-## Author: SM
-## Date: 01/01/2018
-## Version: 1.0.0
+## Author: Sebastian Mackowiak
+## Date: 04/04/2019
+## Version: 1.0.1
 ######################
 
 use File::Path;
@@ -108,7 +108,8 @@ my $go =GetOptions ('reads|r=s' => \$options{r},
     'useumitag|a' => \$options{a},
     'exactbegin|J' => \$options{J},
     'exactend|K' => \$options{K},
-    'help|h' => \$options{h}
+    'help|h' => \$options{h},
+    'remaining|z' => \$options{z}
 );
 
 
@@ -257,7 +258,8 @@ else only the species in your dataset is considered
 ".col($G,'-B/--onecol5p3p')."              put 5p/3p read counts in output in same column
 ".col($G,'-a/--useumitag')."               use the _uINT tag instead of the _xINT tag for counting reads 
 ".col($G,'-J/--exactbegin')."              count only reads that have the exact 5 prime end (no isomirs) (defined by -e 0)
-".col($G,'-K/--exactend')."                count only reads that have the exact 3 prime ends (no variation at the 3p end allowed). (defined by -f 0). 
+".col($G,'-K/--exactend')."                count only reads that have the exact 3 prime ends (no variation at the 3p end allowed). (defined by -f 0)
+".col($G,'-z/--remaining')."               output remaining reads per sample 
 
 Using J,K and g=0 and -e 0 -f 0 will count only the mature sequence with no MM
 \n";
@@ -754,6 +756,7 @@ sub ConvertFastaFile{
     while($line = <INX>){
         chomp $line;
         $line =~ s/\+/p/g;
+        $line = $1 if($line =~ /^(\S+)/);
         if($line =~ /^(>\S+)\s*(\S*)/){
             $tmpid = $1;
             if($code){
@@ -1285,6 +1288,8 @@ sub ReadinReadsMappingFile{
             if($options{'W'}){$len_sc /= $mapcounts{$line[0]};} ## weighing reads here}
             $hash{$line[2]}{'r'} += $len_sc;
             $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
+            $hash{$line[2]}{'rest'} += $len_sc;
+            $hash_sample{$sample}{$line[2]}{'rest'}+= $len_sc;
         }
     }
 }
@@ -1453,8 +1458,19 @@ sub PrintExpressionValuesSamples{
 
                 print OUTG "\n";
             }
+            if($options{'z'}){
+                print OUTG "${pkey}-rest\t$hash{$pkey}{'rest'}\t$pkey\t$hash{$pkey}{'rest'}";
+                for my $sample(sort keys %hash_sample){
+                    next if($sample =~ /config/);
+                    if($hash_sample{$sample}{$pkey}{'rest'}){
+                        printf OUTG ("\t${pf}",$hash_sample{$sample}{$pkey}{'rest'});
+                    }else{
+                        print OUTG "\t0";
+                    }
+                }
+                print OUTG "\n";
+            }
         }
-
     }
     if($options{'s'}){
         for my $pkey (sort keys %hash_star){
