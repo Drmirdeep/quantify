@@ -112,7 +112,6 @@ my $go =GetOptions ('reads|r=s' => \$options{r},
     'remaining|z' => \$options{z}
 );
 
-
 die "One of the options supplied doesn't exist\n" if(not $go);
 
 if($options{'A'}){ $options{'F'} =1;}
@@ -381,9 +380,11 @@ open ERR,">quantifier_${time}.log" or die "Cannot create log file for quantifier
 print ERR strftime('%Y-%m-%d at %H:%M',localtime)," started\n";
 print ERR "$ccall\n";
 for my $k(sort keys %options){
-#	print ERR "$k\t$d{$k}";
-    if(defined $options{$k} and$options{$k} =~ /\S/){print ERR "$k\t$d{$k}, value set to ::: $options{$k}\n";}
-#	print ERR "\n";
+    if(defined $options{$k}){
+        if($options{$k} =~ /\S/){
+             print ERR "$k\t$d{$k}, value set to ::: $options{$k}\n";
+        }
+    } 
 }
 print ERR "\n";
 
@@ -655,7 +656,7 @@ sub Mapping{
 sub read_stats{
     my ($f1,$f2)=@_;
     my %hash;
-    my $count;
+    my $count=0;
     my %k2;
     my $total;
 
@@ -694,6 +695,8 @@ sub read_stats{
     print STDERR "total: ",$count,"\t",$count2,"\t",$count-$count2,"\t";
     printf STDERR "%.3f\t%.3f\n",$count2/$count,1-($count2/$count);
     foreach(sort keys %k2){
+        $k2{$_}||=0;
+        $k22{$_}||=0;
         print STDERR "$_: ",$k2{$_},"\t",$k22{$_},"\t",$k2{$_}-$k22{$_},"\t";
         printf STDERR "%.3f\t%.3f\n",$k22{$_}/$k2{$_},1-($k22{$_}/$k2{$_});
         print STATS "$_: ",$k2{$_},"\t",$k22{$_},"\t",$k2{$_}-$k22{$_},"\t";
@@ -861,7 +864,7 @@ sub ReadinMatureMappingFile{
     my $matches;
     open OUT,">mature2hairpin" or die "cannot create file mature2hairpin\n";
     open IN,"${name1}_mapped.bwt" or die "Mature mapping file ${name1}_mapped.bwt not found \n";
-    my $cx;
+    my $cx=0;
     my $id1 ='';
     my $id2='';
 
@@ -1290,6 +1293,9 @@ sub ReadinReadsMappingFile{
             $hash_sample{$sample}{$line[2]}{'r'}+= $len_sc;
             $hash{$line[2]}{'rest'} += $len_sc;
             $hash_sample{$sample}{$line[2]}{'rest'}+= $len_sc;
+            if($options{'z'}){
+                $total{$sample}+=$len_sc;
+            }
         }
     }
 }
@@ -1459,6 +1465,7 @@ sub PrintExpressionValuesSamples{
                 print OUTG "\n";
             }
             if($options{'z'}){
+                $hash{$pkey}{'rest'}||=0;
                 print OUTG "${pkey}-rest\t$hash{$pkey}{'rest'}\t$pkey\t$hash{$pkey}{'rest'}";
                 for my $sample(sort keys %hash_sample){
                     next if($sample =~ /config/);
@@ -1466,6 +1473,16 @@ sub PrintExpressionValuesSamples{
                         printf OUTG ("\t${pf}",$hash_sample{$sample}{$pkey}{'rest'});
                     }else{
                         print OUTG "\t0";
+                    }
+                }
+                if(not $opt_R){
+                    for my $sample(sort keys %hash_sample){
+                        next if($sample =~ /config/);
+                        if($hash_sample{$sample}{$pkey}{'rest'}){
+                            printf OUTG ("\t${pf}",$total_t*$hash_sample{$sample}{$pkey}{'rest'}/$total{$sample});
+                        }else{
+                            print OUTG "\t0";
+                        }
                     }
                 }
                 print OUTG "\n";
@@ -1814,6 +1831,10 @@ sub CreateOutputMRD{
     }
     close IN;
     print STDERR "generating mrd file now\n";	
+    my $RNAret=`RNAfold --help 2>&1`;
+    my @RNAFt=split("\n",$RNAret);
+    my $RNAadd='';
+    if($RNAFt[0] =~ /2/){$RNAadd='-';}
 
     for my $k1(sort keys %hash){
         if($species ne "none"){
@@ -1826,10 +1847,7 @@ sub CreateOutputMRD{
 
         ## if not F given then we get a dot bracket notation, otherwise we just use the dots. This will speed up the quantification
         if(!$options{'F'}){
-            my $ret=`RNAfold --help |grep RNAfold |grep 2`;
-            my $add='';
-            $add='-' if($ret);
-            @str=`echo $hash{$k1}{'seq'}| RNAfold ${add}-noPS` ;
+            @str=`echo $hash{$k1}{'seq'}| RNAfold ${RNAadd}-noPS` ;
             @str1 = split(/\s+/,$str[1]);
         }else{
             $str1[0]="." x length($hash{$k1}{'seq'});
@@ -2050,6 +2068,8 @@ sub dhash{
     $$d{J}="count only mature reads that have the exact 5 prime end (no isomirs) (defined -e 0)";
     $$d{K}="count only exact 3 prime ends (no variation at the 3p end allowed) (defined by -f 0 ). Using J,K and g=1 and -e 0 -f 0 will count only the exact mature sequence with no MM";
     $$d{H}="allows 'N's in sequences";
+    $$d{h}="show help message";
+    $$d{z}="output remaining reads per sample";
 }	
 
 __DATA__
