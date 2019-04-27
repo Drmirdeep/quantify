@@ -208,6 +208,7 @@ getopts("Aab:f:ot:eq:di:j:lm:M:PW:SzNZGp:D",\%options);
 
 ## if not options{'P'} we cant use options{'Z'}
 $options{'Z'} =0 if(not $options{'P'});
+$options{'Z'} =1;
 
 my $trna=0;
 $trna=1 if(`head -n1 $options{'q'}|grep -i trna`); ## this we need to get from somewhere
@@ -1338,6 +1339,7 @@ $img
 </tr>
 </table>
 EOF
+if(0){
 if(not $trna){
     print HTML <<EOF;
 <button id="b3">preprocessing statistics</button>
@@ -1353,12 +1355,13 @@ if(not $trna){
 </div>
 EOF
 }
+}
 print HTML "
-<button id=\"b4\">0entries</button>
+<button id=\"b4\">toggle not expressed IDs</button>
 ";
 
-}
 
+}
 sub CloseHTML{
     print HTML <<EOF;
 </table>
@@ -1411,7 +1414,7 @@ sub PrintHtmlTableHeader{
         $h{15}{1} = 'consensus star sequence';
         $h{15}{2} = 'this is the consensus star miRNA sequence as inferred from the deep sequencing reads.';
         $h{16}{1} = 'consensus precursor sequence';
-        $h{16}{2} = 'this is the consensus precursor miRNA sequence as inferred from the deep sequencing reads. Note that this is the inferred Drosha hairpin product, and therefore does not include substantial flanking genomic sequence as does most miRBase precursors.';
+        $h{16}{2} = 'this is the consensus precursor miRNA sequence as inferred from the deep sequencing reads. Note that this is the inferred Drosha hairpin product, and therefore does not include substantial flanking genomic sequence as do most miRBase precursors.';
         if($options{'a'}){
             $h{17}{1} = 'genomic position';
         }
@@ -1449,7 +1452,7 @@ sub PrintHtmlTableHeader{
         $h{15}{1} = 'consensus star sequence';
         $h{15}{2} = 'this is the consensus star miRNA sequence as inferred from the deep sequencing reads.';
         $h{16}{1} = 'consensus precursor sequence';
-        $h{16}{2} = 'this is the consensus precursor miRNA sequence as inferred from the deep sequencing reads. Note that this is the inferred Drosha hairpin product, and therefore does not include substantial flanking genomic sequence as does most miRBase precursors.';
+        $h{16}{2} = 'this is the consensus precursor miRNA sequence as inferred from the deep sequencing reads. Note that this is the inferred Drosha hairpin product, and therefore does not include substantial flanking genomic sequence as do most miRBase precursors.';
         if($options{'a'}){
             $h{17}{1} = 'genomic position';
         }
@@ -1462,7 +1465,7 @@ sub PrintHtmlTableHeader{
             $h{1}{1} = 'snoRNA id';
             $h{1}{2} = 'Clicking this field will display a pdf of the structure and read signature of the snoRNA.';
         }else{
-            $h{1}{1} = 'miRBase precursor id';
+            $h{1}{1} = 'miRNA precursor id';
             $h{1}{2} = 'Clicking this field will display a pdf of the structure and read signature of the miRNA.';
         }
         $h{2}{1} = '-';
@@ -1533,7 +1536,7 @@ sub PrintHtmlTableHeader{
                 }
             }
 
-            $h{16}{1} = 'miRBase precursor sequence';
+            $h{16}{1} = 'miRNA precursor sequence';
             $h{16}{2} = 'this is the precursor miRNA sequence input to quantify.';
             if($trna){
                 $h{16}{1} = 'tRNA precursor sequence';
@@ -2030,7 +2033,12 @@ sub PrintQuantifier{
         my $s_mat = $hash_q{$id}{'mat_seq'};
 
         ##here the belonging precursor is shown
-        $known="<td nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$oid</a></td>";
+        $known="<td nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">"; #$oid</a></td>";
+        my $mirgdb=$id;
+        $mirgdb=$1 if($id =~ /(\S+)-[53]p/);
+        $mirgdb=$1 if($mirgdb =~ /(\S+)-pre/);
+        my $known2="<td nowrap=\"nowrap\"><a href=\"http://mirgenedb.org/browse?org=ALL&query=$mirgdb\" target=\"_blank\">";#$oid</a></td>";
+        $known=$known2 if($mirgdb =~ /-P(\d+)/);
 
         $sf = $hash_q{$id}{"freq_star"};
         $mf = $hash_q{$id}{"freq_mature"};
@@ -2069,11 +2077,12 @@ EOF
         print UT "$id\t$hash_q{$id}{'freq_total'}";
         print UTB "$id\t$hash_q{$id}{'freq_total'}";
 
-        $mf = "<table>";
-        $s_mat = "<table>";
+        $mf = "<table class=\"values\">";
+        $s_mat = "<table class=\"values\">";
 
 #$mf .= "<tr><td> miRNA </td><td>total</td>";
-        $mf .= "<tr><td WIDTH=$width>sample</td>";		
+        #$mf .= "<tr><td WIDTH=$width>sample</td>";		
+        $mf .= "<tr><td>sample</td>";		
 
         my $hmf='';
         my $vmf='';
@@ -2088,7 +2097,8 @@ EOF
             for my $mx(keys %mature){ 
                 $countms++;
                 # $mf .= "<tr><td nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td><td> $mature{$mx} </td>";
-                $vmf .= "\n<tr><td  nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td>";
+                #$vmf .= "\n<tr><td  nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td>";
+                $vmf .= "\n<tr>$known$mx</a></td>";
                 $mkey='';
                 $mk2='';
                 for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
@@ -2112,7 +2122,7 @@ EOF
                     if($exprs_sample{$sample}{$id}{$mx} != 0){
                         $cl='';
                     }
-                    $hmf.="<td $cl>$sample</td>" if($countms ==1);
+                    #$hmf.="<td $cl>$sample</td>" if($countms ==1);
                     $vmf .= "<td $cl><nobr><span class=\"$class\">$exprs_sample{$sample}{$id}{$mx}</span></nobr></td>";
 #		die $exprs_sample{$sample}{$id}{$mx};
                 }
@@ -2121,7 +2131,7 @@ EOF
                 $s_mat .= "<tr><td>$hm{$mx}</td></tr>";
             }
         }else{
-            $vmf .= "\n<tr><td  nowrap=\"nowrap\"><a>-</a></td>";
+            $vmf .= "\n<tr class=\"zero\"><td  nowrap=\"nowrap\"><a>-</a></td>";
             for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
                 $vmf .= "<td><nobr>0</nobr></td>";
                 $mkey.="\t0";
@@ -2135,7 +2145,7 @@ EOF
 
         ## add rest reads here per sample
         if($options{'D'}){
-            $vmf .= "\n<tr><td  nowrap=\"nowrap\">${id}-rest</td>";
+            $vmf .= "\n<tr><td nowrap=\"nowrap\">${id}-rest</td>";
             for my $sample(sort keys %exprs_sample){
                 my $idr="${id}-rest";
                 $vmf .= "<td><nobr>$exprs_sample{$sample}{$id}{$idr}</nobr></td>";
@@ -2147,9 +2157,6 @@ EOF
         $mf.="$hmf$vmf";
 
 
-        if(not $options{'Z'}){	
-            $mf .= "</table>\n";
-        }
         $s_mat .= "</table>";
 
         print HTML "$mf</td>\n";
@@ -2157,16 +2164,16 @@ EOF
         if(not $options{'z'}){	
             ## if((scalar keys %star) > 0)
             $s_star = "<table>";
-            if(not $options{'Z'}){
-                $sf = "<table>";
-            }
+            #if(not $options{'Z'}){
+            #    $sf = "<table>";
+            #}
 #$sf .= "<tr><td> miRNA </td><td>total    </td>";
-            if(not $options{'Z'}){
-                $sf .= "<tr><td WIDTH=$width>sample</td>";		
-                for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
+            #    if(not $options{'Z'}){
+            #   $sf .= "<tr><td WIDTH=$width>sample</td>";		
+            #   for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
                     #$sf .= "<td>$sample</td>";
-                }
-            }
+                    #   }
+                    #}
             my $vsf='';
             my $hsf='';
 
@@ -2210,7 +2217,8 @@ EOF
                     $s_star .= "<tr><td>$hs{$sx}</td>\n</tr>";
                 }
             }else{
-                $vsf .= "\n<tr><td  nowrap=\"nowrap\"><a>na</a></td>";
+                if(1){
+                $vsf .= "\n<tr class=\"zero\"><td  nowrap=\"nowrap\"><a>-</a></td>";
                 for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
                     #$vsf .= "<td class=\"zero\"><nobr>0</nobr></td>";
                     $vsf .= "<td><nobr>0</nobr></td>";
@@ -2221,6 +2229,7 @@ EOF
 
                 $vsf .= "</tr>\n";
                 $s_star .= "<tr><td>-</td></tr>";	
+                }
             }
 
             $vsf .= "</table>\n";
@@ -2232,9 +2241,9 @@ EOF
             print HTML "<td>$sf</td>\n";
 
             if(length($mkey) == 0){$mkey='\t0';}
-            if(length($skey) == 0){$skey='\t0';}
+            if(not $skey or length($skey) == 0){$skey='\t0';}
             if(length($mk2) == 0){$mk2='\t0';}
-            if(length($sk2) == 0){$sk2='\t0';}
+            if(not $sk2 or length($sk2) == 0){$sk2='\t0';}
 
 
             print UT "$mkey$skey";

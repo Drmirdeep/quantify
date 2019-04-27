@@ -19,7 +19,19 @@ table.all tr:first-child th {
 /* no applied to externally loaded table but why not ? */
 table#stable td {
 	text-align: right;
+}
 
+table.values {
+    table-layout:fixed;
+}
+
+table.values td {
+    text-align: right;
+}
+table.values tr td:first-child{
+    text-align: left;
+    width: 180px;
+    overflow: hidden;
 }
 
 div#

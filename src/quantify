@@ -1436,6 +1436,8 @@ sub PrintExpressionValuesSamples{
             for(my $i = 1; $i <= $hash{$pkey}{'c'}; $i++){
                 printf OUTG ("%s\t${pf}\t%s\t${pf}",$hash{$pkey}{$i}{'mature'},$hash{$pkey}{$i}{'score'},$pkey,$hash{$pkey}{$i}{'score'});
 
+                ## output normal scores is Z not given
+                ## if Z given skip this and only output
                 if(not $options{'Z'}){	
                     for my $sample(sort keys %hash_sample){
                         next if($sample =~ /config/);
@@ -1452,6 +1454,7 @@ sub PrintExpressionValuesSamples{
                     }
                 }
 
+                ## output rpms if R not given
                 if(not $opt_R){					
                     for my $sample(sort keys %hash_sample){
                         next if($sample =~ /config/);
@@ -1466,17 +1469,21 @@ sub PrintExpressionValuesSamples{
 
                 print OUTG "\n";
             }
+            ## print out rest reads if option is given
             if($options{'z'}){
                 $hash{$pkey}{'rest'}||=0;
                 print OUTG "${pkey}-rest\t$hash{$pkey}{'rest'}\t$pkey\t$hash{$pkey}{'rest'}";
-                for my $sample(sort keys %hash_sample){
-                    next if($sample =~ /config/);
-                    if($hash_sample{$sample}{$pkey}{'rest'}){
-                        printf OUTG ("\t${pf}",$hash_sample{$sample}{$pkey}{'rest'});
-                    }else{
-                        print OUTG "\t0";
+                if(not $options{'Z'}){
+                    for my $sample(sort keys %hash_sample){
+                        next if($sample =~ /config/);
+                        if($hash_sample{$sample}{$pkey}{'rest'}){
+                            printf OUTG ("\t${pf}",$hash_sample{$sample}{$pkey}{'rest'});
+                        }else{
+                            print OUTG "\t0";
+                        }
                     }
                 }
+                ## output rpms if r not given
                 if(not $opt_R){
                     for my $sample(sort keys %hash_sample){
                         next if($sample =~ /config/);
