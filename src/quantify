@@ -560,8 +560,10 @@ if(not -f './mystyle.css'){
     }
 }
 
+my $opt_D='';
+if($options{'z'}){$opt_D=' -D';}
 
-$command = "make_html3.pl -q $outdir/miRBase.mrd  -i $outdir/${name1}_mapped.arf -M miRNAs_expressed_all_samples_$time.csv $starf $opt_l $opt_m $opt_t $opt_d $opt_o $opt_P $opt_W $opt_A $opt_S $opt_z $opt_N $opt_G $opt_B";
+$command = "make_html3.pl -q $outdir/miRBase.mrd  -i $outdir/${name1}_mapped.arf -M miRNAs_expressed_all_samples_$time.csv $starf $opt_l $opt_m $opt_t $opt_d $opt_o $opt_P $opt_W $opt_A $opt_S $opt_z $opt_N $opt_G $opt_B $opt_D";
 
 print ERR "\n## making html output file now\n";
 print ERR "$command\n";

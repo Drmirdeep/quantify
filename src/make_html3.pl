@@ -204,7 +204,7 @@ my $blast_query = "&db=nucleotide&QUERY_FROM=&QUERY_TO=&QUERYFILE=&GENETIC_CODE=
 ## options
 my %options=();
 
-getopts("Auf:ot:eq:dab:i:j:lm:M:PW:SzNZGp:",\%options);
+getopts("Aab:f:ot:eq:di:j:lm:M:PW:SzNZGp:D",\%options);
 
 ## if not options{'P'} we cant use options{'Z'}
 $options{'Z'} =0 if(not $options{'P'});
@@ -2078,7 +2078,7 @@ EOF
         my $hmf='';
         my $vmf='';
         for my $sample(sort keys %exprs_sample){                                            #$exprs_sample{$sample}{$line[0]} = $line[1];
-            #$mf .= "<td>$sample</td>";
+            $mf .= "<td>$sample</td>";
         }
 
         my ($mkey,$skey);
@@ -2087,7 +2087,7 @@ EOF
         if(scalar keys %mature != 0){
             for my $mx(keys %mature){ 
                 $countms++;
-#    $mf .= "<tr><td nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td><td> $mature{$mx} </td>";
+                # $mf .= "<tr><td nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td><td> $mature{$mx} </td>";
                 $vmf .= "\n<tr><td  nowrap=\"nowrap\"><a href=\"http://www.mirbase.org/cgi-bin/query.pl?terms=$id\" target=\"_blank\">$mx</a></td>";
                 $mkey='';
                 $mk2='';
@@ -2134,12 +2134,14 @@ EOF
         }
 
         ## add rest reads here per sample
-        $vmf .= "\n<tr><td  nowrap=\"nowrap\">${id}-rest</td>";
-        for my $sample(sort keys %exprs_sample){
-            my $idr="${id}-rest";
-            $vmf .= "<td><nobr>$exprs_sample{$sample}{$id}{$idr}</nobr></td>";
+        if($options{'D'}){
+            $vmf .= "\n<tr><td  nowrap=\"nowrap\">${id}-rest</td>";
+            for my $sample(sort keys %exprs_sample){
+                my $idr="${id}-rest";
+                $vmf .= "<td><nobr>$exprs_sample{$sample}{$id}{$idr}</nobr></td>";
+            }
+            $vmf .= "</tr>\n";
         }
-        $vmf .= "</tr>\n";
 
         ## fuse them
         $mf.="$hmf$vmf";
