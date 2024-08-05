@@ -19,7 +19,7 @@ use warnings;
 
 print STDERR "\n
 ###############################################################################################
-# Last update: Jan 08, 2018
+# Last update: Aug 05, 2024
 # This is the quantify installer
 # It will try to download all necessary third-party tools and install them. 
 ###############################################################################################
@@ -122,15 +122,18 @@ my $curl=`which curl`;
 my $dtool='';
 my $dopt='';
 
-if($wget =~ /URL/i){
-    $dtool ="wget";
-
-}elsif($curl){
+if($curl){
     $dtool ="curl -L"; ## forces curl to follow redirections
     $dopt=" -O";
+}elsif($wget =~ /URL/i){
+    $dtool ="wget";
+
 }else{
     die "No commandline download tool found on your system. Please install wget or curl on your machine\n";
 }
+#$dtool ="curl -L"; ## forces curl to follow redirections
+#$dopt=" -O";
+
 
 my $err;
 my $dfile='';
@@ -195,12 +198,12 @@ if($g){
     }
 
     `echo >> ~/$shellconf`;
-    print STDERR "please run the install.pl script again in a new terminal window or just type
+    print STDERR "please run the install_quant.pl script again in a new terminal window or just type
 
     source ~/$shellconf
-    perl install.pl
+    perl install_quant.pl
 
-    so that the new environment variables are visible to the install.pl script\n";
+    so that the new environment variables are visible to the install_quant.pl script\n";
 
     exit;
 }
@@ -215,12 +218,12 @@ if(not $g){
     }	
 
     `echo >> ~/$shellconf`;
-    print STDERR "please run the install.pl script again in a new terminal window or just type
+    print STDERR "please run the install_quant.pl script again in a new terminal window or just type
 
     source ~/$shellconf
-    perl install.pl
+    perl install_quant.pl
 
-    so that the new environment variables are visible to the install.pl script\n";
+    so that the new environment variables are visible to the install_quant.pl script\n";
     exit;
 }
 
@@ -247,6 +250,8 @@ my $a=`uname -a`;
 my $bowtie;
 
 my $bowtie_version="1.1.1";
+#$dtool = 'curl';
+
 if($dtool =~ /curl/){
     `$dtool https://sourceforge.net/projects/bowtie-bio/files/bowtie/ > to_del`;
 }else{
@@ -288,14 +293,15 @@ if($ret == 0){
         }
 
         if(not -f $bowtie){
-            if(check("http://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/$bowtie_version/$bowtie")){
-                $err=system("$dtool http://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/$bowtie_version/$bowtie $dopt");
+
+            if(check("https://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/$bowtie_version/$bowtie")){
+                $err=system("$dtool https://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/$bowtie_version/$bowtie $dopt");
 
                 if($err){
                     die "\nError:\n\t$bowtie could not be downloaded\n\n\n";
                 }
-            }elsif(check("http://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/old/$bowtie_version/$bowtie")){
-                $err=system("$dtool http://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/old/$bowtie_version/$bowtie $dopt");
+            }elsif(check("https://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/old/$bowtie_version/$bowtie")){
+                $err=system("$dtool https://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/old/$bowtie_version/$bowtie $dopt");
                 if($err){
                     die "\nError:\n\t$bowtie could not be downloaded\n\n\n";
                 }
@@ -310,12 +316,12 @@ if($ret == 0){
                 }
 
             }else{
-                die "\nError:\n\t$bowtie not found on server http://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/ \n\n\n";
+                die "\nError:\n\t$bowtie not found on server https://netcologne.dl.sourceforge.net/project/bowtie-bio/bowtie/ \n\n\n";
             }
         }
 
         if(not -f "$bowtie"){
-            die "$bowtie download failed \nPlease try to download bowtie manually from here http://bowtie-bio.sourceforge.net/index.shtml";
+            die "$bowtie download failed \nPlease try to download bowtie manually from here https://bowtie-bio.sourceforge.net/index.shtml";
         }
 
         print STDERR "Installing bowtie binaries\n\n";
@@ -446,14 +452,13 @@ if(not $zlib){
 }
 
 $ret = checkBIN("perl -e \'use Font::TTF; print \"installed\";\'","installed");
-
 if($ret == 0){
     print STDERR "Font::TTf                                        already installed, nothing to do ...\n";
     $progs{ttf}=1;
 }else{
     my $version='';
     if( -f "CHECKSUMS"){ unlink "CHECKSUMS";}
-    `$dtool http://www.cpan.org/authors/id/M/MH/MHOSKEN/CHECKSUMS $dopt`;
+    `$dtool https://www.cpan.org/authors/id/M/MH/MHOSKEN/CHECKSUMS $dopt`;
     open IN,"CHECKSUMS" or die "File checksums not found\n";
     while(<IN>){
         if(/((Font-TTF-\d.+).tar.gz)/){
@@ -465,7 +470,7 @@ if($ret == 0){
 
     if(not -f $dfile){
         print STDERR "Downloading Font::TTF now\n\n";
-        `$dtool http://www.cpan.org/authors/id/M/MH/MHOSKEN/$dfile $dopt`;
+        `$dtool https://www.cpan.org/authors/id/M/MH/MHOSKEN/$dfile $dopt`;
     }
 
     if(not -f $dfile){
@@ -505,7 +510,6 @@ if($ret == 0){
 }
 
 
-
 $ret = checkBIN("perl -e \'use PDF::API2; print \"installed\";\'","installed");
 
 if($ret == 0){
@@ -514,10 +518,10 @@ if($ret == 0){
 }else{
     my $version='';
     if( -f "CHECKSUMS"){ unlink "CHECKSUMS";}
-    `$dtool http://www.cpan.org/authors/id/S/SS/SSIMMS/CHECKSUMS $dopt`;
+    `$dtool https://www.cpan.org/authors/id/S/SS/SSIMMS/CHECKSUMS $dopt`;
     open IN,"CHECKSUMS" or die "File checksums not found\n";
     while(<IN>){
-        if(/((PDF-API2.+).tar.gz)/){
+        if(/((PDF-API2.\d+\.{0,1}\d*).tar.gz)/){
             $dfile=$1;
             $version=$2;
         }
@@ -526,7 +530,7 @@ if($ret == 0){
 
     if(not -f $dfile){
         print STDERR "Downloading PDF-API2 now\n\n";
-        `$dtool http://ftp-stud.hs-esslingen.de/pub/Mirrors/CPAN/authors/id/S/SS/SSIMMS/$dfile $dopt`;
+        `$dtool https://ftp-stud.hs-esslingen.de/pub/Mirrors/CPAN/authors/id/S/SS/SSIMMS/$dfile $dopt`;
     }
 
     if(not -f $dfile){
@@ -580,7 +584,7 @@ if($sum == 5){
     ";
     close EF;
 }else{
-    print STDERR "\n\nPlease run the install.pl script again to check if 
+    print STDERR "\n\nPlease run the install_quant.pl script again to check if 
     everything is properly installed.
 
     ";
@@ -659,16 +663,17 @@ sub checkBIN{
 sub check{
     my ($url,$file) = @_;
     my $out='';
+    $file='to_del' if(not $file);
     if($dtool =~ /wget/){
         $out=`wget --spider -v $url 2>&1`;
     }elsif($dtool =~ /curl/){
-        $out=`curl --head $url |head -n1`;
+        $out=`curl -L --head $url |head -n1`;
         if($out =~ /NOT/i){
             $out='broken';
         }
-
+        
         if($url =~ /https/){
-            `curl $url > $file`;
+            `curl -L $url > $file`;
             if(-s "$file" < 1000){
                 $out='broken';
                 `rm -f $file`;
