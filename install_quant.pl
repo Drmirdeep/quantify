@@ -387,22 +387,19 @@ if($ret == 0){
         }
 
         chdir "lib";
-
-        open IN,"<fold.c" or die "File fold.c not found\n";
-        open OUT,">fold.c.new" or die "Cannot generate file fold.c.new\n";
-        while(<IN>){
-            if(/inline\s+(int\s+LoopEnergy.+$)/i){
-                print OUT "$1";
-            }elsif(/^inline\s+(int\s+HairpinE.+$)/i){
-                print OUT "$1";
-            }else{
-                print OUT;
-            }
+        my $PATCH="$dir/patch_files";
+        my @PF=qw(fold cofold subopt treedist);
+        for my $i(@PF){
+            `cp $i.c $i.c.orig`;
+            `cp $PATCH/${i}_patch.c $i.c`;
         }
-        close OUT;
+        chdir "../H";
+        my $i='part_func';
+        `cp $i.h $i.h.orig`;
+        `cp $PATCH/${i}_patch.h $i.h`;
+        chdir "../lib";
 
-        `mv fold.c fold.c.orig`;
-        `mv fold.c.new fold.c`;
+
         print STDERR "compiling libRNA.a\n"; 
         `make libRNA.a 2>> ../install_error.log`;
         if(not -f "libRNA.a"){
@@ -692,7 +689,6 @@ sub check{
         return 1;
     }
 }
-
 
 sub buildgood{
     if(-f $_[0]){
