@@ -19,7 +19,7 @@ use warnings;
 
 print STDERR "\n
 ###############################################################################################
-# Last update: Aug 05, 2024
+# Last update: Aug 24, 2024
 # This is the quantify installer
 # It will try to download all necessary third-party tools and install them. 
 ###############################################################################################
@@ -381,7 +381,7 @@ if($ret == 0){
         `tar xzf ViennaRNA-1.8.4.tar.gz`;
         chdir "ViennaRNA-1.8.4/";
         print STDERR "configuring Vienna package\n";
-        `./configure --prefix=$dir/essentials/ViennaRNA-1.8.4/install_dir`;
+        `./configure --prefix=$dir/essentials/ViennaRNA-1.8.4/install_dir --without-perl --without-forester --without-kinfold`;
         if(not -d "$dir/essentials/ViennaRNA-1.8.4/install_dir/bin/"){
             `mkdir -p $dir/essentials/ViennaRNA-1.8.4/install_dir/bin/`;
         }
